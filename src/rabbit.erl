@@ -142,12 +142,12 @@
                     {requires,    kernel_ready},
                     {enables,     core_initialized}]}).
 
--rabbit_boot_step({rabbit_node_monitor,
-                   [{description, "node monitor"},
-                    {mfa,         {rabbit_sup, start_restartable_child,
-                                   [rabbit_node_monitor]}},
-                    {requires,    [rabbit_alarm, guid_generator]},
-                    {enables,     core_initialized}]}).
+% -rabbit_boot_step({rabbit_node_monitor,
+%                    [{description, "node monitor"},
+%                     {mfa,         {rabbit_sup, start_restartable_child,
+%                                    [rabbit_node_monitor]}},
+%                     {requires,    [rabbit_alarm, guid_generator]},
+%                     {enables,     core_initialized}]}).
 
 -rabbit_boot_step({rabbit_epmd_monitor,
                    [{description, "epmd monitor"},
@@ -167,13 +167,13 @@
                    [{description, "core initialized"},
                     {requires,    kernel_ready}]}).
 
--rabbit_boot_step({upgrade_queues,
-                   [{description, "per-vhost message store migration"},
-                    {mfa,         {rabbit_upgrade,
-                                   maybe_migrate_queues_to_per_vhost_storage,
-                                   []}},
-                    {requires,    [core_initialized]},
-                    {enables,     recovery}]}).
+% -rabbit_boot_step({upgrade_queues,
+%                    [{description, "per-vhost message store migration"},
+%                     {mfa,         {rabbit_upgrade,
+%                                    maybe_migrate_queues_to_per_vhost_storage,
+%                                    []}},
+%                     {requires,    [core_initialized]},
+%                     {enables,     recovery}]}).
 
 -rabbit_boot_step({recovery,
                    [{description, "exchange, queue and binding recovery"},
@@ -241,15 +241,15 @@
                     {requires,    pre_flight}
                     ]}).
 
--rabbit_boot_step({notify_cluster,
-                   [{description, "notifies cluster peers of our presence"},
-                    {mfa,         {rabbit_node_monitor, notify_node_up, []}},
-                    {requires,    pre_flight}]}).
+% -rabbit_boot_step({notify_cluster,
+%                    [{description, "notifies cluster peers of our presence"},
+%                     {mfa,         {rabbit_node_monitor, notify_node_up, []}},
+%                     {requires,    pre_flight}]}).
 
 -rabbit_boot_step({networking,
                    [{description, "TCP and TLS listeners"},
                     {mfa,         {rabbit_networking, boot, []}},
-                    {requires,    notify_cluster}]}).
+                    {requires,    pre_flight}]}).
 
 %%---------------------------------------------------------------------------
 
@@ -280,6 +280,7 @@
 
 start() ->
     %% start() vs. boot(): we want to throw an error in start().
+    % TODO COMMENT OUT rabbit_mnesia:check_cluster_consistency(),
     start_it(temporary).
 
 -spec boot() -> 'ok'.
@@ -319,6 +320,8 @@ run_prelaunch_second_phase() ->
     %% with all steps in this phase.
     #{initial_pass := IsInitialPass} =
     Context = rabbit_prelaunch:get_context(),
+
+    set_mnevis_initial_nodes(),
 
     case IsInitialPass of
         true ->
@@ -366,6 +369,16 @@ run_prelaunch_second_phase() ->
         false -> ok
     end,
     ok.
+
+set_mnevis_initial_nodes() ->
+    case application:get_env(mnevis, initial_nodes, none) of
+        none ->
+            case application:get_env(rabbit, cluster_nodes, none) of
+                none -> ok;
+                {Nodes, disc} -> application:set_env(mnevis, initial_nodes, Nodes)
+            end;
+        _ -> ok
+    end.
 
 %% Try to send systemd ready notification if it makes sense in the
 %% current environment. standard_error is used intentionally in all
@@ -1049,7 +1062,9 @@ boot_delegate() ->
 -spec recover() -> 'ok'.
 
 recover() ->
+    io:format("Recover policy ~n"),
     ok = rabbit_policy:recover(),
+    io:format("Recover vhost ~n"),
     ok = rabbit_vhost:recover(),
     ok = lager_exchange_backend:maybe_init_exchange().
 
@@ -1057,7 +1072,13 @@ recover() ->
 
 maybe_insert_default_data() ->
     case rabbit_table:needs_default_data() of
-        true  -> insert_default_data();
+        true  ->
+            {ok, _, {_, Leader}} = ra:members(mnevis_node:node_id()),
+            case Leader == node() of
+                true ->
+                    insert_default_data();
+                false -> ok
+            end;
         false -> ok
     end.
 

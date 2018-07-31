@@ -297,6 +297,6 @@ upgrade_v1_to_v2(_) ->
                                          ?amqqueue_v1_type),
     ?assert(?is_amqqueue_v1(OldQueue)),
     ?assert(not ?is_amqqueue_v2(OldQueue)),
-    NewQueue = amqqueue:upgrade_to(amqqueue_v2, OldQueue),
+    NewQueue = amqqueue:upgrade_to(OldQueue, amqqueue_v2),
     ?assert(not ?is_amqqueue_v1(NewQueue)),
     ?assert(?is_amqqueue_v2(NewQueue)).

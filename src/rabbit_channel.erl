@@ -2265,8 +2265,9 @@ confirm(MsgSeqNos, QRef, State = #ch{queue_names = QNames, unconfirmed = UC}) ->
 send_confirms_and_nacks(State = #ch{tx = none, confirmed = [], rejected = []}) ->
     State;
 send_confirms_and_nacks(State = #ch{tx = none, confirmed = C, rejected = R}) ->
-    case rabbit_node_monitor:pause_partition_guard() of
-        ok      ->
+    %% TODO: rabbit_node_monitor
+    % case rabbit_node_monitor:pause_partition_guard() of
+        % ok      ->
             Confirms = lists:append(C),
             Rejects = lists:append(R),
             ConfirmMsgSeqNos =
@@ -2285,13 +2286,17 @@ send_confirms_and_nacks(State = #ch{tx = none, confirmed = C, rejected = R}) ->
             send_nacks(RejectMsgSeqNos,
                        ConfirmMsgSeqNos,
                        State1#ch{rejected = []});
-        pausing -> State
-    end;
+        % pausing -> State
+    % end;
 send_confirms_and_nacks(State) ->
-    case rabbit_node_monitor:pause_partition_guard() of
-        ok      -> maybe_complete_tx(State);
-        pausing -> State
-    end.
+    %% TODO: rabbit_node_monitor
+    % case rabbit_node_monitor:pause_partition_guard() of
+        % ok      ->
+        maybe_complete_tx(State)
+        % ;
+        % pausing -> State
+    % end
+    .
 
 send_nacks([], _, State) ->
     State;

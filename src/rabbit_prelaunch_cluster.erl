@@ -6,7 +6,7 @@ setup(Context) ->
     rabbit_log_prelaunch:debug(""),
     rabbit_log_prelaunch:debug("== Clustering =="),
     rabbit_log_prelaunch:debug("Preparing cluster status files"),
-    rabbit_node_monitor:prepare_cluster_status_files(),
+    % TODO LRB MNEVIS rabbit_node_monitor:prepare_cluster_status_files(),
     case Context of
         #{initial_pass := true} ->
             rabbit_log_prelaunch:debug("Upgrading Mnesia schema"),

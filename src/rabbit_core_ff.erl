@@ -59,14 +59,13 @@ quorum_queue_migration(_FeatureName, _FeatureProps, is_enabled) ->
     Tables = ?quorum_queue_tables,
     rabbit_table:wait(Tables, _Retry = true),
     Fields = amqqueue:fields(amqqueue_v2),
-    mnesia:table_info(rabbit_queue, attributes) =:= Fields andalso
-    mnesia:table_info(rabbit_durable_queue, attributes) =:= Fields.
+    mnevis:table_info(rabbit_queue, attributes) =:= Fields andalso
+    mnevis:table_info(rabbit_durable_queue, attributes) =:= Fields.
 
 migrate_to_amqqueue_with_type(FeatureName, [Table | Rest], Fields) ->
     rabbit_log:info("Feature flag `~s`:   migrating Mnesia table ~s...",
                     [FeatureName, Table]),
-    Fun = fun(Queue) -> amqqueue:upgrade_to(amqqueue_v2, Queue) end,
-    case mnesia:transform_table(Table, Fun, Fields) of
+    case mnevis:transform_table(Table, {amqqueue, upgrade_to, [amqqueue_v2]}, Fields) of
         {atomic, ok}      -> migrate_to_amqqueue_with_type(FeatureName,
                                                            Rest,
                                                            Fields);
@@ -86,6 +85,7 @@ implicit_default_bindings_migration(FeatureName, _FeatureProps,
     %% Default exchange bindings are now implicit (not stored in the
     %% route tables). It should be safe to remove them outside of a
     %% transaction.
+    %% TODO: how safe is it in mnevis?
     rabbit_table:wait([rabbit_queue]),
     Queues = mnesia:dirty_all_keys(rabbit_queue),
     remove_explicit_default_bindings(FeatureName, Queues);

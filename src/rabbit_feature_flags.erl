@@ -1612,16 +1612,19 @@ mark_as_enabled_remotely(Nodes, FeatureName, IsEnabled, Timeout) ->
 %% @private
 
 remote_nodes() ->
-    mnesia:system_info(db_nodes) -- [node()].
+    mnevis:db_nodes() -- [node()].
 
 -spec running_remote_nodes() -> [node()].
 %% @private
 
 running_remote_nodes() ->
-    mnesia:system_info(running_db_nodes) -- [node()].
+    %% TODO: why do we need only running nodes?
+    remote_nodes().
+    % mnesia:system_info(running_db_nodes) -- [node()].
 
 query_running_remote_nodes(Node, Timeout) ->
-    case rpc:call(Node, mnesia, system_info, [running_db_nodes], Timeout) of
+    %% TODO: this is weird. Why do we need running_db_nodes from remote?
+    case rpc:call(Node, mnevis, db_nodes, [], Timeout) of
         {badrpc, _} = Error -> Error;
         Nodes               -> Nodes -- [node()]
     end.

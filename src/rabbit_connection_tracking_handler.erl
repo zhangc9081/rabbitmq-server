@@ -46,7 +46,10 @@
                    [{description, "statistics event manager"},
                     {mfa,         {rabbit_sup, start_restartable_child,
                                    [rabbit_connection_tracking]}},
-                    {requires,    [rabbit_event, rabbit_node_monitor]},
+                    {requires,    [rabbit_event
+                                    %% TODO: rabbit_node_monitor
+                                    % ,rabbit_node_monitor
+                                   ]},
                     {enables,     ?MODULE}]}).
 
 %%

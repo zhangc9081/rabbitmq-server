@@ -263,14 +263,17 @@ tcp_listener_started(Protocol, Opts, IPAddress, Port) ->
     %% We need the ip to distinguish e.g. 0.0.0.0 and 127.0.0.1
     %% We need the host so we can distinguish multiple instances of the above
     %% in a cluster.
-    ok = mnesia:dirty_write(
-           rabbit_listener,
-           #listener{node = node(),
-                     protocol = Protocol,
-                     host = tcp_host(IPAddress),
-                     ip_address = IPAddress,
-                     port = Port,
-                     opts = Opts}).
+    TcpHost = tcp_host(IPAddress),
+    L = #listener{node = node(),
+                    protocol = Protocol,
+                    host = TcpHost,
+                    ip_address = IPAddress,
+                    port = Port,
+                    opts = Opts},
+    F = fun () ->
+                ok = mnesia:write(rabbit_listener, L, write)
+        end,
+    ok = rabbit_misc:execute_mnesia_transaction(F).
 
 -spec tcp_listener_stopped
         (_, _,

@@ -334,9 +334,9 @@ record_version_to_use() ->
 
 upgrade(#amqqueue{} = Queue) -> Queue.
 
--spec upgrade_to(amqqueue_v1, amqqueue()) -> amqqueue().
+-spec upgrade_to(amqqueue(), amqqueue_v1) -> amqqueue().
 
-upgrade_to(?record_version, #amqqueue{} = Queue) ->
+upgrade_to(#amqqueue{} = Queue, ?record_version) ->
     Queue.
 
 % arguments

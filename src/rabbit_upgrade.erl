@@ -159,7 +159,8 @@ upgrade_mode(AllNodes) ->
                 {disc, []}  ->
                     primary;
                 {disc, _}  ->
-                    Filename = rabbit_node_monitor:running_nodes_filename(),
+                    %% TODO: rabbit_node_monitor
+                    Filename = "<no filename>", % rabbit_node_monitor:running_nodes_filename(),
                     die("Cluster upgrade needed but other disc nodes shut "
                         "down after this one.~nPlease first start the last "
                         "disc node to shut down.~n~nNote: if several disc "

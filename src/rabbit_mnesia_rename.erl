@@ -207,8 +207,10 @@ convert_backup(NodeMap, FromBackup, ToBackup) ->
       end, switched).
 
 config_files() ->
-    [rabbit_node_monitor:running_nodes_filename(),
-     rabbit_node_monitor:cluster_status_filename()].
+    %% TODO: rabbit_node_monitor
+    [].
+    % [rabbit_node_monitor:running_nodes_filename(),
+     % rabbit_node_monitor:cluster_status_filename()].
 
 backup_of_conf(Path) ->
     filename:join([dir(), filename:basename(Path)]).
@@ -254,7 +256,7 @@ rename_in_running_mnesia(FromNode, ToNode) ->
     ok.
 
 transform_table(Table, Map) ->
-    mnesia:sync_transaction(
+    rabbit_misc:mnevis_transaction(
       fun () ->
               mnesia:lock({table, Table}, write),
               transform_table(Table, Map, mnesia:first(Table))
