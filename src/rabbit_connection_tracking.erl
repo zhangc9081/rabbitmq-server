@@ -184,7 +184,7 @@ ensure_per_vhost_tracked_connections_table_for_this_node() ->
 
 ensure_tracked_connections_table_for_node(Node) ->
     TableName = tracked_connection_table_name_for(Node),
-    case mnesia:create_table(TableName, [{record_name, tracked_connection},
+    case ramnesia:create_table(TableName, [{record_name, tracked_connection},
                                          {attributes, record_info(fields, tracked_connection)}]) of
         {atomic, ok}                   -> ok;
         {aborted, {already_exists, _}} -> ok;
@@ -198,7 +198,7 @@ ensure_tracked_connections_table_for_node(Node) ->
 
 ensure_per_vhost_tracked_connections_table_for_node(Node) ->
     TableName = tracked_connection_per_vhost_table_name_for(Node),
-    case mnesia:create_table(TableName, [{record_name, tracked_connection_per_vhost},
+    case ramnesia:create_table(TableName, [{record_name, tracked_connection_per_vhost},
                                          {attributes, record_info(fields, tracked_connection_per_vhost)}]) of
         {atomic, ok}                   -> ok;
         {aborted, {already_exists, _}} -> ok;
@@ -225,7 +225,7 @@ clear_tracked_connection_tables_for_this_node() ->
 
 delete_tracked_connections_table_for_node(Node) ->
     TableName = tracked_connection_table_name_for(Node),
-    case mnesia:delete_table(TableName) of
+    case ramnesia:delete_table(TableName) of
         {atomic, ok}              -> ok;
         {aborted, {no_exists, _}} -> ok;
         {aborted, Error} ->
@@ -238,7 +238,7 @@ delete_tracked_connections_table_for_node(Node) ->
 
 delete_per_vhost_tracked_connections_table_for_node(Node) ->
     TableName = tracked_connection_per_vhost_table_name_for(Node),
-    case mnesia:delete_table(TableName) of
+    case ramnesia:delete_table(TableName) of
         {atomic, ok}              -> ok;
         {aborted, {no_exists, _}} -> ok;
         {aborted, Error} ->
@@ -344,9 +344,15 @@ count_connections_in(VirtualHost) ->
     lists:foldl(fun (Node, Acc) ->
                         Tab = tracked_connection_per_vhost_table_name_for(Node),
                         try
-                            N = case mnesia:dirty_read(Tab, VirtualHost) of
-                                    []    -> 0;
-                                    [Val] -> Val#tracked_connection_per_vhost.connection_count
+                            N = case ramnesia:transaction(
+                                       fun() ->
+                                               case mnesia:dirty_read({Tab, VirtualHost}) of
+                                                   []    -> 0;
+                                                   [Val] -> Val#tracked_connection_per_vhost.connection_count
+                                               end
+                                       end) of
+                                    {atomic,  Val}     -> Val;
+                                    {aborted, _Reason} -> 0
                                 end,
                             Acc + N
                         catch _:Err  ->
