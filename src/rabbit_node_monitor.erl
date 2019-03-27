@@ -129,7 +129,6 @@ write_cluster_status({All, Disc, Running}) ->
               E1 = {error, _} ->
                   {ClusterStatusFN, E1}
           end,
-    io:format("Written cluster status ~p~n", [{cluster_status_filename(), Res}]),
     case Res of
         {_, ok}           -> ok;
         {FN, {error, E2}} -> throw({error, {could_not_write_file, FN, E2}})
@@ -138,9 +137,6 @@ write_cluster_status({All, Disc, Running}) ->
 -spec read_cluster_status() -> rabbit_mnesia:cluster_status().
 
 read_cluster_status() ->
-io:format("Read cluster status ~p~n", [cluster_status_filename()]),
-io:format("Running nodes status ~p~n", [running_nodes_filename()]),
-
     case {try_read_file(cluster_status_filename()),
           try_read_file(running_nodes_filename())} of
         {{ok, [{All, Disc}]}, {ok, [Running]}} when is_list(Running) ->
