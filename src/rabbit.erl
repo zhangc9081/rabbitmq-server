@@ -286,6 +286,7 @@ start() ->
                      %% We do not want to upgrade mnesia after just
                      %% restarting the app.
                      ok = ensure_application_loaded(),
+                     set_mnevis_initial_nodes(),
                      HipeResult = rabbit_hipe:maybe_hipe_compile(),
                      ok = start_logger(),
                      rabbit_hipe:log_hipe_result(HipeResult),
@@ -302,6 +303,7 @@ boot() ->
     start_it(fun() ->
                      ensure_config(),
                      ok = ensure_application_loaded(),
+                     set_mnevis_initial_nodes(),
                      HipeResult = rabbit_hipe:maybe_hipe_compile(),
                      ok = start_logger(),
                      rabbit_hipe:log_hipe_result(HipeResult),
@@ -320,6 +322,17 @@ boot() ->
 
                      broker_start(Apps)
              end).
+
+
+set_mnevis_initial_nodes() ->
+    case application:get_env(mnevis, initial_nodes, none) of
+        none ->
+            case application:get_env(rabbit, cluster_nodes, none) of
+                none -> ok;
+                {Nodes, disc} -> application:set_env(mnevis, initial_nodes, Nodes)
+            end;
+        _ -> ok
+    end.
 
 ensure_config() ->
     case rabbit_config:validate_config_files() of
