@@ -535,7 +535,7 @@ validate_members(Server, Members) ->
 -spec forget_group(group_name()) -> 'ok'.
 
 forget_group(GroupName) ->
-    {atomic, ok} = mnevis:transaction(
+    {atomic, ok} = rabbit_misc:mnevis_transaction(
                      fun () ->
                              mnesia:delete({?GROUP_TABLE, GroupName})
                      end),

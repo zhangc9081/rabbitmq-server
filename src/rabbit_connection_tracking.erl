@@ -344,7 +344,7 @@ count_connections_in(VirtualHost) ->
     lists:foldl(fun (Node, Acc) ->
                         Tab = tracked_connection_per_vhost_table_name_for(Node),
                         try
-                            N = case mnevis:transaction(
+                            N = case rabbit_misc:mnevis_transaction(
                                        fun() ->
                                                case mnesia:dirty_read({Tab, VirtualHost}) of
                                                    []    -> 0;

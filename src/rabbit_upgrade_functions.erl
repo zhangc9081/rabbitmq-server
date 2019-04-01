@@ -418,7 +418,7 @@ internal_system_x() ->
 -spec cluster_name() -> 'ok'.
 
 cluster_name() ->
-    {atomic, ok} = mnevis:transaction(fun cluster_name_tx/0),
+    {atomic, ok} = rabbit_misc:mnevis_transaction(fun cluster_name_tx/0),
     ok.
 
 cluster_name_tx() ->

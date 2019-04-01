@@ -277,7 +277,7 @@ pid_of(Id) ->
     Pid.
 
 tx_fun(Fun) ->
-    case mnevis:transaction(Fun) of
+    case rabbit_misc:mnevis_transaction(Fun) of
         {atomic,  Result}         -> Result;
         {aborted, Reason}         -> throw({error, Reason})
     end.
