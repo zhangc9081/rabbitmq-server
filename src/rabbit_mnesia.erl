@@ -78,7 +78,7 @@ init() ->
     ensure_mnesia_dir(),
 
     %% TODO mnevis: node start
-    mnevis_node:start(),
+    ok = mnevis_node:start(),
 
     %% Create schema on all nodes
     case is_virgin_node() of
@@ -87,7 +87,7 @@ init() ->
         false ->
             ok
     end,
-    
+
     io:format("~nDb nodes ~p~n", [mnevis:db_nodes()]),
     io:format("~nRunning Db nodes ~p~n", [mnevis:running_db_nodes()]),
 
