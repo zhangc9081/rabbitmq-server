@@ -141,8 +141,6 @@ TEST_DEPS = rabbitmq_ct_helpers rabbitmq_ct_client_helpers amqp_client meck prop
 
 dep_syslog = git https://github.com/schlagert/syslog 3.4.5
 
-dep_mnevis = git https://github.com/rabbitmq/mnevis read-only-query
-
 define usage_xml_to_erl
 $(subst __,_,$(patsubst $(DOCS_DIR)/rabbitmq%.1.xml, src/rabbit_%_usage.erl, $(subst -,_,$(1))))
 endef
@@ -165,7 +163,12 @@ ERLANG_MK_REPO = https://github.com/rabbitmq/erlang.mk.git
 ERLANG_MK_COMMIT = rabbitmq-tmp
 
 include rabbitmq-components.mk
+
+dep_mnevis = git https://github.com/rabbitmq/mnevis read-only-query
+dep_ra = git https://github.com/rabbitmq/ra.git read-only-query-old
+
 include erlang.mk
+
 
 ifeq ($(strip $(BATS)),)
 BATS := $(ERLANG_MK_TMP)/bats/bin/bats
