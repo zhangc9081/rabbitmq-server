@@ -53,10 +53,10 @@
 
 -compile(nowarn_unused_function).
 
--ifdef(TEST).
--compile(export_all).
--export([init_with_lock/3]).
--endif.
+% -ifdef(TEST).
+% -compile(export_all).
+% -export([init_with_lock/3]).
+% -endif.
 
 -include("rabbit.hrl").
 
@@ -140,89 +140,89 @@ wait_for_table(Table) ->
     end.
 
 
-init_with_lock() ->
-    {Retries, Timeout} = rabbit_peer_discovery:retry_timeout(),
-    init_with_lock(Retries, Timeout, fun init_from_config/0).
+% init_with_lock() ->
+%     {Retries, Timeout} = rabbit_peer_discovery:retry_timeout(),
+%     init_with_lock(Retries, Timeout, fun init_from_config/0).
 
-init_with_lock(0, _, InitFromConfig) ->
-    case rabbit_peer_discovery:lock_acquisition_failure_mode() of
-        ignore ->
-            rabbit_log:warning("Cannot acquire a lock during clustering", []),
-            InitFromConfig(),
-            rabbit_peer_discovery:maybe_register();
-        fail ->
-            exit(cannot_acquire_startup_lock)
-    end;
-init_with_lock(Retries, Timeout, InitFromConfig) ->
-    case rabbit_peer_discovery:lock() of
-        not_supported ->
-            rabbit_log:info("Peer discovery backend does not support locking, falling back to randomized delay"),
-            %% See rabbitmq/rabbitmq-server#1202 for details.
-            rabbit_peer_discovery:maybe_inject_randomized_delay(),
-            InitFromConfig(),
-            rabbit_peer_discovery:maybe_register();
-        {error, _Reason} ->
-            timer:sleep(Timeout),
-            init_with_lock(Retries - 1, Timeout, InitFromConfig);
-        {ok, Data} ->
-            try
-                InitFromConfig(),
-                rabbit_peer_discovery:maybe_register()
-            after
-                rabbit_peer_discovery:unlock(Data)
-            end
-    end.
+% init_with_lock(0, _, InitFromConfig) ->
+%     case rabbit_peer_discovery:lock_acquisition_failure_mode() of
+%         ignore ->
+%             rabbit_log:warning("Cannot acquire a lock during clustering", []),
+%             InitFromConfig(),
+%             rabbit_peer_discovery:maybe_register();
+%         fail ->
+%             exit(cannot_acquire_startup_lock)
+%     end;
+% init_with_lock(Retries, Timeout, InitFromConfig) ->
+%     case rabbit_peer_discovery:lock() of
+%         not_supported ->
+%             rabbit_log:info("Peer discovery backend does not support locking, falling back to randomized delay"),
+%             %% See rabbitmq/rabbitmq-server#1202 for details.
+%             rabbit_peer_discovery:maybe_inject_randomized_delay(),
+%             InitFromConfig(),
+%             rabbit_peer_discovery:maybe_register();
+%         {error, _Reason} ->
+%             timer:sleep(Timeout),
+%             init_with_lock(Retries - 1, Timeout, InitFromConfig);
+%         {ok, Data} ->
+%             try
+%                 InitFromConfig(),
+%                 rabbit_peer_discovery:maybe_register()
+%             after
+%                 rabbit_peer_discovery:unlock(Data)
+%             end
+%     end.
 
-init_from_config() ->
-    FindBadNodeNames = fun
-        (Name, BadNames) when is_atom(Name) -> BadNames;
-        (Name, BadNames)                    -> [Name | BadNames]
-    end,
-    {DiscoveredNodes, NodeType} =
-        case rabbit_peer_discovery:discover_cluster_nodes() of
-            {ok, {Nodes, Type} = Config}
-              when is_list(Nodes) andalso
-                   (Type == disc orelse Type == disk orelse Type == ram) ->
-                case lists:foldr(FindBadNodeNames, [], Nodes) of
-                    []       -> Config;
-                    BadNames -> e({invalid_cluster_node_names, BadNames})
-                end;
-            {ok, {_, BadType}} when BadType /= disc andalso BadType /= ram ->
-                e({invalid_cluster_node_type, BadType});
-            {ok, _} ->
-                e(invalid_cluster_nodes_conf)
-        end,
-    rabbit_log:info("All discovered existing cluster peers: ~s~n",
-                    [rabbit_peer_discovery:format_discovered_nodes(DiscoveredNodes)]),
-    Peers = nodes_excl_me(DiscoveredNodes),
-    case Peers of
-        [] ->
-            rabbit_log:info("Discovered no peer nodes to cluster with"),
-            init_db_and_upgrade([node()], disc, false, _Retry = true);
-        _  ->
-            rabbit_log:info("Peer nodes we can cluster with: ~s~n",
-                [rabbit_peer_discovery:format_discovered_nodes(Peers)]),
-            join_discovered_peers(Peers, NodeType)
-    end.
+% init_from_config() ->
+%     FindBadNodeNames = fun
+%         (Name, BadNames) when is_atom(Name) -> BadNames;
+%         (Name, BadNames)                    -> [Name | BadNames]
+%     end,
+%     {DiscoveredNodes, NodeType} =
+%         case rabbit_peer_discovery:discover_cluster_nodes() of
+%             {ok, {Nodes, Type} = Config}
+%               when is_list(Nodes) andalso
+%                    (Type == disc orelse Type == disk orelse Type == ram) ->
+%                 case lists:foldr(FindBadNodeNames, [], Nodes) of
+%                     []       -> Config;
+%                     BadNames -> e({invalid_cluster_node_names, BadNames})
+%                 end;
+%             {ok, {_, BadType}} when BadType /= disc andalso BadType /= ram ->
+%                 e({invalid_cluster_node_type, BadType});
+%             {ok, _} ->
+%                 e(invalid_cluster_nodes_conf)
+%         end,
+%     rabbit_log:info("All discovered existing cluster peers: ~s~n",
+%                     [rabbit_peer_discovery:format_discovered_nodes(DiscoveredNodes)]),
+%     Peers = nodes_excl_me(DiscoveredNodes),
+%     case Peers of
+%         [] ->
+%             rabbit_log:info("Discovered no peer nodes to cluster with"),
+%             init_db_and_upgrade([node()], disc, false, _Retry = true);
+%         _  ->
+%             rabbit_log:info("Peer nodes we can cluster with: ~s~n",
+%                 [rabbit_peer_discovery:format_discovered_nodes(Peers)]),
+%             join_discovered_peers(Peers, NodeType)
+%     end.
 
 %% Attempts to join discovered,
 %% reachable and compatible (in terms of Mnesia internal protocol version and such)
 %% cluster peers in order.
-join_discovered_peers(TryNodes, NodeType) ->
-    case find_reachable_peer_to_cluster_with(nodes_excl_me(TryNodes)) of
-        {ok, Node} ->
-            rabbit_log:info("Node '~s' selected for auto-clustering~n", [Node]),
-            {ok, {_, DiscNodes, _}} = discover_cluster0(Node),
-            init_db_and_upgrade(DiscNodes, NodeType, true, _Retry = true),
-            rabbit_connection_tracking:boot(),
-            rabbit_node_monitor:notify_joined_cluster();
-        none ->
-            rabbit_log:warning(
-              "Could not successfully contact any node of: ~s (as in Erlang distribution). "
-               "Starting as a blank standalone node...~n",
-                [string:join(lists:map(fun atom_to_list/1, TryNodes), ",")]),
-            init_db_and_upgrade([node()], disc, false, _Retry = true)
-    end.
+% join_discovered_peers(TryNodes, NodeType) ->
+%     case find_reachable_peer_to_cluster_with(nodes_excl_me(TryNodes)) of
+%         {ok, Node} ->
+%             rabbit_log:info("Node '~s' selected for auto-clustering~n", [Node]),
+%             {ok, {_, DiscNodes, _}} = discover_cluster0(Node),
+%             init_db_and_upgrade(DiscNodes, NodeType, true, _Retry = true),
+%             rabbit_connection_tracking:boot(),
+%             rabbit_node_monitor:notify_joined_cluster();
+%         none ->
+%             rabbit_log:warning(
+%               "Could not successfully contact any node of: ~s (as in Erlang distribution). "
+%                "Starting as a blank standalone node...~n",
+%                 [string:join(lists:map(fun atom_to_list/1, TryNodes), ",")]),
+%             init_db_and_upgrade([node()], disc, false, _Retry = true)
+%     end.
 
 %% Make the node join a cluster. The node will be reset automatically
 %% before we actually cluster it. The nodes provided will be used to
@@ -1034,29 +1034,29 @@ is_virgin_node() ->
     {ok, Tables, _} = ra:consistent_query(mnevis_node:node_id(), fun(_) -> mnesia:system_info(tables) end),
     not lists:member(rabbit_queue, Tables).
 
-find_reachable_peer_to_cluster_with([]) ->
-    none;
-find_reachable_peer_to_cluster_with([Node | Nodes]) ->
-    Fail = fun (Fmt, Args) ->
-                   rabbit_log:warning(
-                     "Could not auto-cluster with node ~s: " ++ Fmt, [Node | Args]),
-                   find_reachable_peer_to_cluster_with(Nodes)
-           end,
-    case remote_node_info(Node) of
-        {badrpc, _} = Reason ->
-            Fail("~p~n", [Reason]);
-        %% old delegate hash check
-        {_OTP, RMQ, Hash, _} when is_binary(Hash) ->
-            Fail("version ~s~n", [RMQ]);
-        {_OTP, _RMQ, _Protocol, {error, _} = E} ->
-            Fail("~p~n", [E]);
-        {OTP, RMQ, Protocol, _} ->
-            case check_consistency(Node, OTP, RMQ, Protocol) of
-                {error, _} -> Fail("versions ~p~n",
-                                   [{OTP, RMQ}]);
-                ok         -> {ok, Node}
-            end
-    end.
+% find_reachable_peer_to_cluster_with([]) ->
+%     none;
+% find_reachable_peer_to_cluster_with([Node | Nodes]) ->
+%     Fail = fun (Fmt, Args) ->
+%                    rabbit_log:warning(
+%                      "Could not auto-cluster with node ~s: " ++ Fmt, [Node | Args]),
+%                    find_reachable_peer_to_cluster_with(Nodes)
+%            end,
+%     case remote_node_info(Node) of
+%         {badrpc, _} = Reason ->
+%             Fail("~p~n", [Reason]);
+%         %% old delegate hash check
+%         {_OTP, RMQ, Hash, _} when is_binary(Hash) ->
+%             Fail("version ~s~n", [RMQ]);
+%         {_OTP, _RMQ, _Protocol, {error, _} = E} ->
+%             Fail("~p~n", [E]);
+%         {OTP, RMQ, Protocol, _} ->
+%             case check_consistency(Node, OTP, RMQ, Protocol) of
+%                 {error, _} -> Fail("versions ~p~n",
+%                                    [{OTP, RMQ}]);
+%                 ok         -> {ok, Node}
+%             end
+%     end.
 
 is_only_clustered_disc_node() ->
     node_type() =:= disc andalso is_clustered() andalso
@@ -1067,7 +1067,7 @@ are_we_clustered_with(Node) ->
 
 me_in_nodes(Nodes) -> lists:member(node(), Nodes).
 
-nodes_incl_me(Nodes) -> lists:usort([node()|Nodes]).
+% nodes_incl_me(Nodes) -> lists:usort([node()|Nodes]).
 
 nodes_excl_me(Nodes) -> Nodes -- [node()].
 
