@@ -444,18 +444,23 @@ status() ->
     [{nodes, (IfNonEmpty(disc, cluster_nodes(disc)) ++
                   IfNonEmpty(ram, cluster_nodes(ram)))}] ++
         case is_running() of
-            true  -> RunningNodes = cluster_nodes(running),
-                     [{running_nodes, RunningNodes},
-                      {cluster_name,  rabbit_nodes:cluster_name()},
-                      {partitions,    mnesia_partitions(RunningNodes)}];
-            false -> []
+            true ->
+                RunningNodes = cluster_nodes(running),
+                [{running_nodes, RunningNodes},
+                 {cluster_name,  rabbit_nodes:cluster_name()},
+                 {partitions,    mnesia_partitions(RunningNodes)},
+                 {leader,        get_leader()}];
+            false ->
+                []
         end.
 
 mnesia_partitions(Nodes) ->
     Replies = rabbit_node_monitor:partitions(Nodes),
     [Reply || Reply = {_, R} <- Replies, R =/= []].
 
-is_running() -> mnesia:system_info(is_running) =:= yes.
+is_running() ->
+    % TODO mnevis
+    mnesia:system_info(is_running) =:= yes.
 
 -spec is_clustered() -> boolean().
 
@@ -501,6 +506,7 @@ cluster_status_from_mnesia() ->
         false ->
             {error, mnesia_not_running};
         true ->
+            % TODO mnevis
             %% If the tables are not present, it means that
             %% `init_db/3' hasn't been run yet. In other words, either
             %% we are a virgin node or a restarted RAM node. In both
@@ -842,15 +848,16 @@ schema_ok_or_move() ->
 %% We only care about disc nodes since ram nodes are supposed to catch
 %% up only
 create_schema() ->
+    % TODO mnevis
     % io:format("Create schema ~n"),
     % stop_mnesia(),
     % rabbit_misc:ensure_ok(mnesia:create_schema([node()]), cannot_create_schema),
     % start_mnesia(),
-    case ra:members(mnevis_node:node_id()) of
-        {ok, _, {_, Node}} when Node == node() ->
-            io:format("Create tables ~n"),
+    case is_leader(node()) of
+        true ->
+           io:format("Create tables ~n"),
             ok = rabbit_table:create();
-        _ ->
+        false ->
             wait_for_tables()
     end,
     io:format("Check integrity ~n"),
@@ -1070,6 +1077,18 @@ me_in_nodes(Nodes) -> lists:member(node(), Nodes).
 % nodes_incl_me(Nodes) -> lists:usort([node()|Nodes]).
 
 nodes_excl_me(Nodes) -> Nodes -- [node()].
+
+is_leader(Node) ->
+    case ra:members(mnevis_node:node_id()) of
+        {ok, _, {_, Node}} ->
+            true;
+        _ ->
+            false
+    end.
+
+get_leader() ->
+    {ok, _, {_, Node}} = ra:members(mnevis_node:node_id()),
+    Node.
 
 -spec e(any()) -> no_return().
 
