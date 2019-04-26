@@ -271,7 +271,7 @@ tcp_listener_started(Protocol, Opts, IPAddress, Port) ->
                     port = Port,
                     opts = Opts},
     F = fun () ->
-                ok = mnesia:write(rabbit_listener, L)
+                ok = mnesia:write(rabbit_listener, L, write)
         end,
     ok = rabbit_misc:execute_mnesia_transaction(F).
 
