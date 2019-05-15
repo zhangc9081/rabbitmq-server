@@ -201,9 +201,7 @@ categorise_by_scope(Version) when is_list(Version) ->
                           rabbit_misc:maps_cons(Scope, Name, CatVersion)
                   end, maps:new(), Categorised)).
 
-dir() -> rabbit_mnesia:dir().
-
-schema_filename() -> filename:join(dir(), ?VERSION_FILENAME).
+schema_filename() -> rabbit_data:metadata_file(?VERSION_FILENAME).
 
 %% --------------------------------------------------------------------
 

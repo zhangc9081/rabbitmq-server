@@ -130,7 +130,9 @@ start_link(Args) ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [Args], []).
 
 init([Limit]) ->
-    Dir = dir(),
+    % the partition / drive containing this directory will be monitored
+    %% TODO: use multiple dirs
+    Dir = rabbit_data:dir(),
     {ok, Retries} = application:get_env(rabbit, disk_monitor_failure_retries),
     {ok, Interval} = application:get_env(rabbit, disk_monitor_failure_retry_interval),
     State = #state{dir          = Dir,
@@ -201,9 +203,6 @@ code_change(_OldVsn, State, _Extra) ->
 %%----------------------------------------------------------------------------
 %% Server Internals
 %%----------------------------------------------------------------------------
-
-% the partition / drive containing this directory will be monitored
-dir() -> rabbit_mnesia:dir().
 
 set_disk_limits(State, Limit0) ->
     Limit = interpret_limit(Limit0),

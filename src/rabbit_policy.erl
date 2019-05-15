@@ -223,7 +223,8 @@ recover0() ->
     ok.
 
 invalid_file() ->
-    filename:join(rabbit_mnesia:dir(), "policies_are_invalid").
+    %% TODO: is this file related to mnesia data dir?
+    rabbit_data:metadata_file("policies_are_invalid").
 
 %%----------------------------------------------------------------------------
 

@@ -82,7 +82,7 @@ rename(Node, NodeMapList) ->
 
 prepare(Node, NodeMapList) ->
     %% If we have a previous rename and haven't started since, give up.
-    case rabbit_file:is_dir(dir()) of
+    case rabbit_file:is_dir(rename_dir()) of
         true  -> exit({rename_in_progress,
                        "Restart node under old name to roll back"});
         false -> ok = rabbit_file:ensure_dir(mnesia_copy_dir())
@@ -156,9 +156,9 @@ finish(FromNode, ToNode, AllNodes) ->
               "Abandoning rename from ~s to ~s since we are still ~s~n",
               [FromNode, ToNode, FromNode]),
             [{ok, _} = file:copy(backup_of_conf(F), F) || F <- config_files()],
-            ok = rabbit_file:recursive_delete([rabbit_mnesia:dir()]),
+            ok = rabbit_file:recursive_delete([rabbit_data:dir()]),
             ok = rabbit_file:recursive_copy(
-                   mnesia_copy_dir(), rabbit_mnesia:dir()),
+                   mnesia_copy_dir(), rabbit_data:dir()),
             delete_rename_files();
         _ ->
             %% Boot will almost certainly fail but we might as
@@ -182,13 +182,13 @@ finish_secondary(FromNode, ToNode, AllNodes) ->
     delete_rename_files(),
     ok.
 
-dir()                -> rabbit_mnesia:dir() ++ "-rename".
-before_backup_name() -> dir() ++ "/backup-before".
-after_backup_name()  -> dir() ++ "/backup-after".
-rename_config_name() -> dir() ++ "/pending.config".
-mnesia_copy_dir()    -> dir() ++ "/mnesia-copy".
+rename_dir()         -> rabbit_data:dir() ++ "-rename".
+before_backup_name() -> rename_dir() ++ "/backup-before".
+after_backup_name()  -> rename_dir() ++ "/backup-after".
+rename_config_name() -> rename_dir() ++ "/pending.config".
+mnesia_copy_dir()    -> rename_dir() ++ "/mnesia-copy".
 
-delete_rename_files() -> ok = rabbit_file:recursive_delete([dir()]).
+delete_rename_files() -> ok = rabbit_file:recursive_delete([rename_dir()]).
 
 start_mnesia() -> rabbit_misc:ensure_ok(mnesia:start(), cannot_start_mnesia),
                   rabbit_table:force_load(),
@@ -211,7 +211,7 @@ config_files() ->
      rabbit_node_monitor:cluster_status_filename()].
 
 backup_of_conf(Path) ->
-    filename:join([dir(), filename:basename(Path)]).
+    filename:join([rename_dir(), filename:basename(Path)]).
 
 convert_config_files(NodeMap) ->
     [convert_config_file(NodeMap, Path) || Path <- config_files()].

@@ -2809,9 +2809,12 @@ transform_storage(TransformFun) ->
     transform_store(?PERSISTENT_MSG_STORE, TransformFun),
     transform_store(?TRANSIENT_MSG_STORE, TransformFun).
 
+legacy_message_store_base_dir() ->
+    rabbit_data:mnesia_dir().
+
 transform_store(Store, TransformFun) ->
-    rabbit_msg_store:force_recovery(rabbit_mnesia:dir(), Store),
-    rabbit_msg_store:transform_dir(rabbit_mnesia:dir(), Store, TransformFun).
+    rabbit_msg_store:force_recovery(legacy_message_store_base_dir(), Store),
+    rabbit_msg_store:transform_dir(legacy_message_store_base_dir(), Store, TransformFun).
 
 move_messages_to_vhost_store() ->
     case list_persistent_queues() of
@@ -2965,7 +2968,7 @@ read_old_recovery_terms(Queues) ->
 run_old_persistent_store(Refs, StartFunState) ->
     OldStoreName = ?PERSISTENT_MSG_STORE,
     ok = rabbit_sup:start_child(OldStoreName, rabbit_msg_store, start_global_store_link,
-                                [OldStoreName, rabbit_mnesia:dir(),
+                                [OldStoreName, legacy_message_store_base_dir(),
                                  Refs, StartFunState]),
     OldStoreName.
 
@@ -2992,10 +2995,10 @@ stop_new_store(NewStore) ->
 delete_old_store() ->
     log_upgrade("Removing the old message store data"),
     rabbit_file:recursive_delete(
-        [filename:join([rabbit_mnesia:dir(), ?PERSISTENT_MSG_STORE])]),
+        [filename:join([legacy_message_store_base_dir(), ?PERSISTENT_MSG_STORE])]),
     %% Delete old transient store as well
     rabbit_file:recursive_delete(
-        [filename:join([rabbit_mnesia:dir(), ?TRANSIENT_MSG_STORE])]),
+        [filename:join([legacy_message_store_base_dir(), ?TRANSIENT_MSG_STORE])]),
     ok.
 
 log_upgrade(Msg) ->

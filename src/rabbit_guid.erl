@@ -51,7 +51,7 @@ start_link() ->
 -spec filename() -> string().
 
 filename() ->
-    filename:join(rabbit_mnesia:dir(), ?SERIAL_FILENAME).
+    rabbit_data:metadata_file(?SERIAL_FILENAME).
 
 update_disk_serial() ->
     Filename = filename(),

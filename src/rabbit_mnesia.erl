@@ -34,7 +34,6 @@
          is_registered_process_alive/1,
          cluster_nodes/1,
          node_type/0,
-         dir/0,
          cluster_status_from_mnesia/0,
 
          %% Operations on the db and utils, mainly used in `rabbit_upgrade' and `rabbit'
@@ -516,8 +515,8 @@ node_type() ->
     end.
 
 -spec dir() -> file:filename().
-
-dir() -> mnesia:system_info(directory).
+%% TODO: check usages of this function to separate mnesia specific cases
+dir() -> rabbit_data:mnesia_dir().
 
 %%----------------------------------------------------------------------------
 %% Operations on the db

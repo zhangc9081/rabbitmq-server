@@ -109,7 +109,7 @@ start_link(VHost) ->
 upgrade_recovery_terms() ->
     open_global_table(),
     try
-        QueuesDir = filename:join(rabbit_mnesia:dir(), "queues"),
+        QueuesDir = filename:join(legacy_data_dir(), "queues"),
         Dirs = case rabbit_file:list_dir(QueuesDir) of
                    {ok, Entries} -> Entries;
                    {error, _}    -> []
@@ -143,7 +143,7 @@ dets_upgrade(Fun)->
     end.
 
 open_global_table() ->
-    File = filename:join(rabbit_mnesia:dir(), "recovery.dets"),
+    File = filename:join(legacy_data_dir(), "recovery.dets"),
     {ok, _} = dets:open_file(?MODULE, [{file,      File},
                                        {ram_file,  true},
                                        {auto_save, infinity}]),
@@ -170,7 +170,10 @@ read_global(DirBaseName) ->
     end.
 
 delete_global_table() ->
-    file:delete(filename:join(rabbit_mnesia:dir(), "recovery.dets")).
+    file:delete(filename:join(legacy_data_dir(), "recovery.dets")).
+
+legacy_data_dir() ->
+    rabbit_data:mnesia_dir().
 
 %%----------------------------------------------------------------------------
 

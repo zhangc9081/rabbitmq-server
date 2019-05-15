@@ -22,7 +22,6 @@
 
 -include("rabbit.hrl").
 
--define(VERSION_FILENAME, "schema_version").
 -define(LOCK_FILENAME, "schema_upgrade_lock").
 
 %% -------------------------------------------------------------------
@@ -303,11 +302,8 @@ apply_upgrade(Scope, {M, F}) ->
 
 %% -------------------------------------------------------------------
 
-dir() -> rabbit_mnesia:dir().
-
-lock_filename() -> lock_filename(dir()).
-lock_filename(Dir) -> filename:join(Dir, ?LOCK_FILENAME).
-backup_dir() -> dir() ++ "-upgrade-backup".
+lock_filename() -> rabbit_data:metadata_file(?LOCK_FILENAME).
+backup_dir() -> rabbit_data:dir() ++ "-upgrade-backup".
 
 node_type_legacy() ->
     %% This is pretty ugly but we can't start Mnesia and ask it (will
@@ -315,7 +311,7 @@ node_type_legacy() ->
     %% even if we're a disc node).  We also can't use
     %% rabbit_mnesia:node_type/0 because that will give false
     %% positives on Rabbit up to 2.5.1.
-    case filelib:is_regular(filename:join(dir(), "rabbit_durable_exchange.DCD")) of
+    case filelib:is_regular(filename:join(rabbit_data:mnesia_dir(), "rabbit_durable_exchange.DCD")) of
         true  -> disc;
         false -> ram
     end.

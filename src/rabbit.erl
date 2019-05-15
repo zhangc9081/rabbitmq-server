@@ -852,7 +852,8 @@ status() ->
           {enabled_plugin_file, rabbit_plugins:enabled_plugins_file()}],
     S6 = [{config_files, config_files()},
            {log_files, log_locations()},
-           {data_directory, rabbit_mnesia:dir()}],
+           %% TODO: list all dirs
+           {data_directory, rabbit_data:dir()}],
     Totals = case rabbit:is_running() of
                  true ->
                      [{virtual_host_count, rabbit_vhost:count()},
@@ -1196,7 +1197,8 @@ log_banner() ->
                 {"cookie hash",    rabbit_nodes:cookie_hash()},
                 {"log(s)",         FirstLog}] ++
                OtherLogs ++
-               [{"database dir",   rabbit_mnesia:dir()}],
+               %% TODO: list all dirs
+               [{"database dir",   rabbit_data:dir()}],
     DescrLen = 1 + lists:max([length(K) || {K, _V} <- Settings]),
     Format = fun (K, V) ->
                      rabbit_misc:format(

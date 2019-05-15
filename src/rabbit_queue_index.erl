@@ -582,9 +582,6 @@ queue_name_to_dir_name_legacy(Name = #resource { kind = queue }) ->
     <<Num:128>> = erlang:md5(term_to_binary_compat:term_to_binary_1(Name)),
     rabbit_misc:format("~.36B", [Num]).
 
-queues_base_dir() ->
-    rabbit_mnesia:dir().
-
 blank_state_name_dir_funs(Name, Dir, OnSyncFun, OnSyncMsgFun) ->
     {ok, MaxJournal} =
         application:get_env(rabbit, queue_index_max_journal_entries),
@@ -1469,7 +1466,7 @@ drive_transform_fun(Fun, Hdl, Contents) ->
     end.
 
 move_to_per_vhost_stores(#resource{} = QueueName) ->
-    OldQueueDir = filename:join([queues_base_dir(), "queues",
+    OldQueueDir = filename:join([legacy_queues_base_dir(),
                                  queue_name_to_dir_name_legacy(QueueName)]),
     NewQueueDir = queue_dir(QueueName),
     rabbit_log_upgrade:info("About to migrate queue directory '~s' to '~s'",
@@ -1513,10 +1510,13 @@ read_global_recovery_terms(DurableQueueNames) ->
     {OrderedTerms, {fun queue_index_walker/1, {start, DurableQueueNames}}}.
 
 cleanup_global_recovery_terms() ->
-    rabbit_file:recursive_delete([filename:join([queues_base_dir(), "queues"])]),
+    rabbit_file:recursive_delete([legacy_queues_base_dir()]),
     rabbit_recovery_terms:delete_global_table(),
     ok.
 
+%% Legacy queues directory
+legacy_queues_base_dir() ->
+    filename:join(rabbit_data:mnesia_dir(), "queues").
 
 update_recovery_term(#resource{virtual_host = VHost} = QueueName, Term) ->
     Key = queue_name_to_dir_name(QueueName),

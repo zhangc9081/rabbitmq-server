@@ -83,33 +83,19 @@ ensure1(FileJustChanged0) ->
 
 -spec plugins_expand_dir() -> file:filename().
 plugins_expand_dir() ->
-    case application:get_env(rabbit, plugins_expand_dir) of
-        {ok, ExpandDir} ->
-            ExpandDir;
-        _ ->
-            filename:join([rabbit_mnesia:dir(), "plugins_expand_dir"])
-    end.
+    rabbit_data:plugins_expand_dir().
 
 -spec plugins_dir() -> file:filename().
 plugins_dir() ->
-    case application:get_env(rabbit, plugins_dir) of
-        {ok, PluginsDistDir} ->
-            PluginsDistDir;
-        _ ->
-            filename:join([rabbit_mnesia:dir(), "plugins_dir_stub"])
-    end.
+    rabbit_data:plugins_dir().
 
 -spec enabled_plugins_file() -> file:filename().
 enabled_plugins_file() ->
-     case application:get_env(rabbit, enabled_plugins_file) of
-        {ok, Val} ->
-            Val;
-        _ ->
-            filename:join([rabbit_mnesia:dir(), "enabled_plugins"])
-    end.
+    rabbit_data:enabled_plugins_file().
 
 -spec enabled_plugins() -> [atom()].
 enabled_plugins() ->
+    %% TODO: why not enabled_plugins_file/0 ?
     case application:get_env(rabbit, enabled_plugins_file) of
         {ok, EnabledFile} ->
             read_enabled(EnabledFile);

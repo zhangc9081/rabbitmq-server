@@ -74,15 +74,15 @@ start_link() -> gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 -spec running_nodes_filename() -> string().
 
 running_nodes_filename() ->
-    filename:join(rabbit_mnesia:dir(), "nodes_running_at_shutdown").
+    rabbit_data:metadata_file("nodes_running_at_shutdown").
 
 -spec cluster_status_filename() -> string().
 
 cluster_status_filename() ->
-    filename:join(rabbit_mnesia:dir(), "cluster_nodes.config").
+    rabbit_data:metadata_file("cluster_nodes.config").
 
 quorum_filename() ->
-    filename:join(rabbit_mnesia:dir(), "quorum").
+    rabbit_data:quorum_queues_dir().
 
 -spec prepare_cluster_status_files() -> 'ok' | no_return().
 
