@@ -245,10 +245,11 @@ wait_for_table(Table) ->
 join_cluster(DiscoveryNode, NodeType) ->
     ensure_mnesia_not_running(),
     ensure_mnesia_dir(),
-    case is_only_clustered_disc_node() of
-        true  -> e(clustering_only_disc_node);
-        false -> ok
-    end,
+    % TODO mnevis
+    % case is_only_clustered_disc_node() of
+    %     true  -> e(clustering_only_disc_node);
+    %     false -> ok
+    % end,
     {ClusterNodes, _, _} = discover_cluster([DiscoveryNode]),
     case me_in_nodes(ClusterNodes) of
         false ->
@@ -311,10 +312,11 @@ reset_gracefully() ->
     %% Force=true here so that reset still works when clustered with a
     %% node which is down.
     init_db_with_mnesia(AllNodes, node_type(), false, false, _Retry = false),
-    case is_only_clustered_disc_node() of
-        true  -> e(resetting_only_disc_node);
-        false -> ok
-    end,
+    %% TODO mnevis
+    %% case is_only_clustered_disc_node() of
+    %%     true  -> e(resetting_only_disc_node);
+    %%     false -> ok
+    %% end,
     leave_cluster(),
     rabbit_misc:ensure_ok(mnesia:delete_schema([node()]), cannot_delete_schema),
     wipe().
@@ -734,7 +736,10 @@ check_cluster_consistency() ->
                     ok;
                 false ->
                     error({should_not_get_here, cluster_inconsistency}),
-
+                    %% TODO mnevis
+                    %% Since the above error/1 call exits the process, why
+                    %% does the following code still exist below?
+                    %%
                     %% We delete the schema here since we think we are
                     %% clustered with nodes that are no longer in the
                     %% cluster and there is no other way to remove
@@ -1038,8 +1043,18 @@ check_rabbit_consistency(RemoteNode, RemoteVersion) ->
 %% exception of the cluster status files, which will be there thanks to
 %% `rabbit_node_monitor:prepare_cluster_status_file/0'.
 is_virgin_node() ->
-    {ok, Tables, _} = ra:consistent_query(mnevis_node:node_id(), fun(_) -> mnesia:system_info(tables) end),
-    not lists:member(rabbit_queue, Tables).
+    %% TODO mnevis
+    NodeId = mnevis_node:node_id(),
+    F = fun(_) -> mnesia:system_info(tables) end,
+    case ra:consistent_query(NodeId, F) of
+        {ok, Tables, _} ->
+            not lists:member(rabbit_queue, Tables);
+        {error, noproc} ->
+            % TODO mnevis
+            % ra is not running and this is probably not
+            % the right place to start it
+            true
+    end.
 
 % find_reachable_peer_to_cluster_with([]) ->
 %     none;
