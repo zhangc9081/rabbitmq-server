@@ -250,7 +250,9 @@ join_cluster(DiscoveryNode, NodeType) ->
     %     true  -> e(clustering_only_disc_node);
     %     false -> ok
     % end,
+    rabbit_log:debug("MNEVIS: pre-discover_cluster DiscoveryNode ~p", [DiscoveryNode]),
     {ClusterNodes, _, _} = discover_cluster([DiscoveryNode]),
+    rabbit_log:debug("MNEVIS: post-discover_cluster ClusterNodes ~p", [ClusterNodes]),
     case me_in_nodes(ClusterNodes) of
         false ->
             case check_cluster_consistency(DiscoveryNode, false) of
@@ -260,7 +262,7 @@ join_cluster(DiscoveryNode, NodeType) ->
                     %% cluster with new nodes which are not in synch
                     %% with the current node. It also lifts the burden
                     %% of resetting the node from the user.
-                    reset_gracefully(),
+                    ok = reset_gracefully_mnevis(),
 
                     %% Join the cluster
                     rabbit_log:info("Clustering with ~p as ~p node~n",
@@ -303,6 +305,12 @@ reset() ->
 force_reset() ->
     ensure_mnesia_not_running(),
     rabbit_log:info("Resetting Rabbit forcefully~n", []),
+    wipe().
+
+reset_gracefully_mnevis() ->
+    rabbit_log:debug("MNEVIS: reset_gracefully_mnevis"),
+    leave_cluster(),
+    rabbit_misc:ensure_ok(mnesia:delete_schema([node()]), cannot_delete_schema),
     wipe().
 
 reset_gracefully() ->
@@ -604,6 +612,7 @@ init_db(ClusterNodes, NodeType, CheckOtherNodes) ->
             ok;
         {[_ | _], _, _} ->
             %% Subsequent node in cluster, catch up
+            Leader = get_mnevis_leader(),
             maybe_force_load(),
             ok = rabbit_table:wait_for_replicated(_Retry = true),
             ok = rabbit_table:create_local_copy(NodeType)
