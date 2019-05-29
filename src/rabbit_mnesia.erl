@@ -88,12 +88,12 @@ init() ->
             ok
     end,
 
-    io:format("~nDb nodes ~p~n", [mnevis:db_nodes()]),
-    io:format("~nRunning Db nodes ~p~n", [mnevis:running_db_nodes()]),
+    rabbit_log:debug("MNEVIS: db nodes ~p", [mnevis:db_nodes()]),
+    rabbit_log:debug("MNEVIS: running db nodes ~p", [mnevis:running_db_nodes()]),
 
-    io:format("Get cluster status ~n"),
+    rabbit_log:debug("MNEVIS: get cluster status"),
     {ok, Status} = cluster_status_from_mnesia(),
-    io:format("Cluster status ~p~n", [Status]),
+    rabbit_log:debug("MNEVIS: cluster status ~p", [Status]),
 
     rabbit_node_monitor:write_cluster_status(Status),
 
@@ -628,8 +628,9 @@ init_db_and_upgrade(ClusterNodes, NodeType, CheckOtherNodes, Retry) ->
     %% `maybe_upgrade_local' restarts mnesia, so ram nodes will forget
     %% about the cluster
     case NodeType of
-        ram  -> start_mnesia(),
-                change_extra_db_nodes(ClusterNodes, false);
+        ram  ->
+            start_mnesia(),
+            change_extra_db_nodes(ClusterNodes, false);
         disc -> ok
     end,
     %% ...and all nodes will need to wait for tables
@@ -840,6 +841,9 @@ schema_ok_or_move() ->
         ok ->
             ok;
         {error, Reason} ->
+            %% TODO mnevis
+            %% comment contradicts code
+            %%
             %% NB: we cannot use rabbit_log here since it may not have been
             %% started yet
             rabbit_log:warning("schema integrity check failed: ~p~n"
@@ -854,20 +858,25 @@ schema_ok_or_move() ->
 %% up only
 create_schema() ->
     % TODO mnevis
-    % io:format("Create schema ~n"),
+    % Why are these commented out? How is a schema even created?
+    % rabbit_log:debug("MNEVIS: create schema"),
     % stop_mnesia(),
     % rabbit_misc:ensure_ok(mnesia:create_schema([node()]), cannot_create_schema),
     % start_mnesia(),
+    %
+    % TODO mnevis
+    % Why only create tables on a leader node?
+    % What happens when a new node joins?
     case is_leader(node()) of
         true ->
-           io:format("Create tables ~n"),
+            rabbit_log:debug("MNEVIS: create tables ~n"),
             ok = rabbit_table:create();
         false ->
             wait_for_tables()
     end,
-    io:format("Check integrity ~n"),
+    rabbit_log:debug("MNEVIS: check integrity"),
     ensure_schema_integrity(),
-    io:format("Record version ~n"),
+    rabbit_log:debug("MNEVIS: record version"),
     ok = rabbit_version:record_desired().
 
 move_db() ->
@@ -932,9 +941,10 @@ wait_for(Condition) ->
     timer:sleep(1000).
 
 start_mnesia(_CheckConsistency) ->
+    % TODO mnevis
     % case CheckConsistency of
-        % true  -> check_cluster_consistency();
-        % false -> ok
+    %   % true  -> check_cluster_consistency();
+    %   % false -> ok
     % end,
     rabbit_misc:ensure_ok(mnesia:start(), cannot_start_mnesia),
     ensure_mnesia_running().
@@ -946,15 +956,18 @@ stop_mnesia() ->
     stopped = mnesia:stop(),
     ensure_mnesia_not_running().
 
-change_extra_db_nodes(ClusterNodes0, CheckOtherNodes) ->
+change_extra_db_nodes(ClusterNodes0, _CheckOtherNodes) ->
     ClusterNodes = nodes_excl_me(ClusterNodes0),
-    case {mnesia:change_config(extra_db_nodes, ClusterNodes), ClusterNodes} of
-        {{ok, []}, [_|_]} when CheckOtherNodes ->
-            throw({error, {failed_to_cluster_with, ClusterNodes,
-                           "Mnesia could not connect to any nodes."}});
-        {{ok, Nodes}, _} ->
-            Nodes
-    end.
+    rabbit_log:debug("MNEVIS: change_extra_db_nodes ClusterNodes0 ~p ClusterNodes ~p", [ClusterNodes0, ClusterNodes]),
+    ClusterNodes.
+    % TODO mnevis
+    % case {mnesia:change_config(extra_db_nodes, ClusterNodes), ClusterNodes} of
+    %     {{ok, []}, [_|_]} when CheckOtherNodes ->
+    %         throw({error, {failed_to_cluster_with, ClusterNodes,
+    %                        "Mnesia could not connect to any nodes."}});
+    %     {{ok, Nodes}, _} ->
+    %         Nodes
+    % end.
 
 check_consistency(Node, OTP, Rabbit, ProtocolVersion) ->
     rabbit_misc:sequence_error(
