@@ -97,6 +97,8 @@ init() ->
 
     rabbit_node_monitor:write_cluster_status(Status),
 
+    rabbit_connection_tracking:boot(),
+
     % rabbit_node_monitor:update_cluster_status(),
 
     % case is_virgin_node() of
@@ -264,11 +266,15 @@ join_cluster(DiscoveryNode, NodeType) ->
                     %% of resetting the node from the user.
                     ok = reset_gracefully_mnevis(),
 
+                    ClusterNodes1 = [node()|ClusterNodes],
+                    rabbit_log:debug("MNEVIS: post-discover_cluster ClusterNodes1 ~p", [ClusterNodes1]),
+                    ok = application:set_env(mnevis, initial_nodes, ClusterNodes1),
+
                     %% Join the cluster
-                    rabbit_log:info("Clustering with ~p as ~p node~n",
-                                    [ClusterNodes, NodeType]),
-                    ok = init_db_with_mnesia(ClusterNodes, NodeType,
-                                             true, true, _Retry = true),
+                    %% TODO mnevis
+                    %% rabbit_log:info("Clustering with ~p as ~p node~n", [ClusterNodes, NodeType]),
+
+                    %% ok = init_db_with_mnesia(ClusterNodes, NodeType, true, true, _Retry = true),
                     rabbit_connection_tracking:boot(),
                     rabbit_node_monitor:notify_joined_cluster(),
                     ok;
@@ -320,11 +326,10 @@ reset_gracefully() ->
     %% Force=true here so that reset still works when clustered with a
     %% node which is down.
     init_db_with_mnesia(AllNodes, node_type(), false, false, _Retry = false),
-    %% TODO mnevis
-    %% case is_only_clustered_disc_node() of
-    %%     true  -> e(resetting_only_disc_node);
-    %%     false -> ok
-    %% end,
+    case is_only_clustered_disc_node() of
+        true  -> e(resetting_only_disc_node);
+        false -> ok
+    end,
     leave_cluster(),
     rabbit_misc:ensure_ok(mnesia:delete_schema([node()]), cannot_delete_schema),
     wipe().
@@ -612,7 +617,6 @@ init_db(ClusterNodes, NodeType, CheckOtherNodes) ->
             ok;
         {[_ | _], _, _} ->
             %% Subsequent node in cluster, catch up
-            Leader = get_mnevis_leader(),
             maybe_force_load(),
             ok = rabbit_table:wait_for_replicated(_Retry = true),
             ok = rabbit_table:create_local_copy(NodeType)
