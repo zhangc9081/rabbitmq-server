@@ -244,7 +244,10 @@ wait_for_table(Table) ->
 -spec join_cluster(node(), node_type())
                         -> ok | {ok, already_member} | {error, {inconsistent_cluster, string()}}.
 
-join_cluster(DiscoveryNode, NodeType) ->
+join_cluster(DiscoveryNode, _NodeType) ->
+    % Note: DiscoveryNode is the node to which this one
+    % is joining, i.e. the argument after "join_cluster" in
+    % rabbitmqctl join_cluster ...
     ensure_mnesia_not_running(),
     ensure_mnesia_dir(),
     % TODO mnevis
@@ -266,15 +269,18 @@ join_cluster(DiscoveryNode, NodeType) ->
                     %% of resetting the node from the user.
                     ok = reset_gracefully_mnevis(),
 
-                    ClusterNodes1 = [node()|ClusterNodes],
+                    Node = node(),
+                    ClusterNodes1 = lists:usort([Node|ClusterNodes]),
                     rabbit_log:debug("MNEVIS: post-discover_cluster ClusterNodes1 ~p", [ClusterNodes1]),
-                    ok = application:set_env(mnevis, initial_nodes, ClusterNodes1),
 
                     %% Join the cluster
                     %% TODO mnevis
                     %% rabbit_log:info("Clustering with ~p as ~p node~n", [ClusterNodes, NodeType]),
-
                     %% ok = init_db_with_mnesia(ClusterNodes, NodeType, true, true, _Retry = true),
+                    {ok, _} = application:ensure_all_started(mnevis),
+                    ok = ra:start_server(mnevis_node, {mnevis_node, Node}, {module, mnevis_machine, #{}}, ClusterNodes1),
+                    {ok, _, _} = rpc:call(DiscoveryNode, mnevis_node, add_node, [Node]),
+
                     rabbit_connection_tracking:boot(),
                     rabbit_node_monitor:notify_joined_cluster(),
                     ok;
@@ -317,7 +323,11 @@ reset_gracefully_mnevis() ->
     rabbit_log:debug("MNEVIS: reset_gracefully_mnevis"),
     leave_cluster(),
     rabbit_misc:ensure_ok(mnesia:delete_schema([node()]), cannot_delete_schema),
-    wipe().
+    wipe(),
+    % TODO mnevis
+    ok = application:start(ra),
+    ok = ra:force_delete_server(mnevis_node).
+
 
 reset_gracefully() ->
     AllNodes = cluster_nodes(all),
@@ -662,6 +672,8 @@ init_db_with_mnesia(ClusterNodes, NodeType,
 -spec ensure_mnesia_dir() -> 'ok'.
 
 ensure_mnesia_dir() ->
+    % TODO mnevis
+    % Not necessary as mnesia will be RAM nodes for mnevis
     MnesiaDir = dir() ++ "/",
     case filelib:ensure_dir(MnesiaDir) of
         {error, Reason} ->
