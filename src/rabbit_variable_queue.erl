@@ -2309,7 +2309,10 @@ beta_limit(Q) ->
     end.
 
 delta_limit(?BLANK_DELTA_PATTERN(_X))             -> undefined;
-delta_limit(#delta { start_seq_id = StartSeqId }) -> StartSeqId.
+% TODO LRB d() here?
+delta_limit(#delta{}=Delta0) ->
+    Delta1 = d(Delta0),
+    Delta1#delta.start_seq_id.
 
 %%----------------------------------------------------------------------------
 %% Iterator
@@ -2348,7 +2351,9 @@ next({delta, #delta{start_seq_id = SeqId,
     SeqIdB = rabbit_queue_index:next_segment_boundary(SeqId),
     SeqId1 = lists:min([SeqIdB, SeqIdEnd]),
     {List, IndexState1} = rabbit_queue_index:read(SeqId, SeqId1, IndexState),
-    next({delta, Delta#delta{start_seq_id = SeqId1}, List, State}, IndexState1);
+    % TODO LRB added d() here
+    Delta1 = d(Delta0#delta{start_seq_id = SeqId1}),
+    next({delta, Delta1, List, State}, IndexState1);
 next({delta, Delta, [], State}, IndexState) ->
     next({delta, Delta, State}, IndexState);
 next({delta, Delta, [{_, SeqId, _, _, _} = M | Rest], State}, IndexState) ->
