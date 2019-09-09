@@ -135,10 +135,11 @@ endef
 
 LOCAL_DEPS = sasl mnesia os_mon inets compiler public_key crypto ssl syntax_tools
 BUILD_DEPS = rabbitmq_cli syslog
-DEPS = ranch lager rabbit_common ra sysmon_handler stdout_formatter recon observer_cli
+DEPS = ranch lager rabbit_common ra sysmon_handler stdout_formatter recon observer_cli inet_tcp_compress_dist
 TEST_DEPS = rabbitmq_ct_helpers rabbitmq_ct_client_helpers amqp_client meck proper
 
 dep_syslog = git https://github.com/schlagert/syslog 3.4.5
+dep_inet_tcp_compress_dist = git https://github.com/essen/inet_tcp_compress_dist master
 
 define usage_xml_to_erl
 $(subst __,_,$(patsubst $(DOCS_DIR)/rabbitmq%.1.xml, src/rabbit_%_usage.erl, $(subst -,_,$(1))))
