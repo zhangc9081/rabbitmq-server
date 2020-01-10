@@ -169,11 +169,11 @@ init_aux(_) ->
 handle_aux(_RaMachine, {call, _}, {register_reader, _Tag, Pid},
            Aux0, Log0, #?MODULE{last_index = LastIdx} = _MacState) ->
     %% TODO Tag needs to included in register
+    rabbit_log:info("handle_aux register_reader ~w", [_Tag]),
     {LastWritten, _} = ra_log:last_written(Log0),
     MaxIdx = min(LastWritten, LastIdx),
     %% send this max_index update to trigger initial read
     Effs = [{send_msg, Pid, {max_index, MaxIdx}, [ra_event, local]}],
-    % {Log, Effs} = ra_log:register_reader(Pid, Log0),
     {reply, MaxIdx, Aux0, Log0, [{monitor, process, aux, Pid} | Effs]};
 handle_aux(_RaMachine, _Type, {end_stream, Tag, Pid},
            Aux0, Log0, _MacState) ->
@@ -200,6 +200,7 @@ handle_aux(_RaMachine, _Type, tick,
 
 stream_entries(Name, Id, Str) ->
     stream_entries(Name, Id, Str, []).
+
 
 stream_entries(Name, Id,
                #stream{
@@ -315,6 +316,7 @@ handle_event(_From, {machine, {max_index, MaxIdx}},
                       #stream_client{name = Name,
                                      local = Local,
                                      readers = Readers0} = State) ->
+    rabbit_log:info("max inxdex received ~w", [MaxIdx]),
     Readers = maps:map(
                 fun(Tag, S0) ->
                         Str0 = S0#stream{max_index = MaxIdx},

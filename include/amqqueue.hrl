@@ -68,6 +68,11 @@
          ?amqqueue_v2_field_type(Q) =:= rabbit_stream_queue) orelse
         false).
 
+-define(amqqueue_is_stream2(Q),
+        (?is_amqqueue_v2(Q) andalso
+         ?amqqueue_v2_field_type(Q) =:= rabbit_stream2_queue) orelse
+        false).
+
 -define(amqqueue_has_valid_pid(Q),
         ((?is_amqqueue_v2(Q) andalso
           is_pid(?amqqueue_v2_field_pid(Q))) orelse

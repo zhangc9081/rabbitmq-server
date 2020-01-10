@@ -228,6 +228,8 @@
 -define(IS_QUORUM(QPid), is_tuple(QPid)).
 
 -define(IS_STREAM(St), element(1,St) == stream_client).
+-define(IS_STREAM2(St), element(1,St) == stream2_client).
+
 %%----------------------------------------------------------------------------
 
 -export_type([channel_number/0]).
@@ -679,7 +681,7 @@ handle_cast({stream_delivery, _CTag, _Msg},
             State = #ch{cfg = #conf{state = closing}}) ->
     noreply(State);
 handle_cast({stream_delivery, ConsumerTag, Msgs}, State0) ->
-    % rabbit_log:info("stream delivery ~w", [Msgs]),
+    rabbit_log:info("stream delivery ~w", [Msgs]),
     %% streams always require acks for now
     State = lists:foldl(
               fun(Msg, Acc) ->
@@ -839,6 +841,29 @@ handle_info({ra_event, {Name, _} = From, EvtBody} = Evt,
             noreply_coalesce(State0)
     end;
 
+handle_info({osiris_offset, QName, Offs},
+            #ch{queue_states = QueueStates0} = State) ->
+    rabbit_log:info("osiris offset ~w ~w", [QName, Offs]),
+    case QueueStates0 of
+        #{QName := QState0} when ?IS_STREAM2(QState0) ->
+            QState = rabbit_stream2_queue:handle_offset(QState0, Offs),
+            noreply(State#ch{queue_states = QueueStates0#{QName => QState}});
+        _ ->
+            noreply(State)
+    end;
+handle_info({osiris_written, QName, Corrs},
+            #ch{queue_states = QueueStates0} = State0) ->
+    case QueueStates0 of
+        #{QName := QState0} when ?IS_STREAM2(QState0) ->
+            {MsgSeqNos, QState} = rabbit_stream2_queue:handle_written(
+                                    QState0, Corrs),
+
+            State = State0#ch{queue_states = QueueStates0#{QName => QState}},
+            noreply_coalesce(confirm(MsgSeqNos, QName, State));
+        _ ->
+            noreply(State0)
+    end;
+
 handle_info({bump_credit, Msg}, State) ->
     %% A rabbit_amqqueue_process is granting credit to our channel. If
     %% our channel was being blocked by this process, and no other
@@ -895,6 +920,9 @@ handle_info(tick, State0 = #ch{queue_states = QueueStates0}) ->
     QueueStates1 =
         maps:filter(fun(_, QS) when ?IS_STREAM(QS) ->
                             QName = rabbit_stream_queue:queue_name(QS),
+                            [] /= rabbit_amqqueue:lookup([QName]);
+                       (_, QS) when ?IS_STREAM2(QS) ->
+                            QName = rabbit_stream2_queue:queue_name(QS),
                             [] /= rabbit_amqqueue:lookup([QName]);
                        (_, QS) ->
                             QName = rabbit_quorum_queue:queue_name(QS),
@@ -2062,7 +2090,7 @@ record_sent(Type, Tag, AckRequired,
     rabbit_trace:tap_out(Msg, ConnName, ChannelNum, Username, TraceState),
     UAMQ1 = case AckRequired of
                 true  -> ?QUEUE:in({DeliveryTag, Tag, DeliveredAt,
-                                    {QPid, MsgId}}, UAMQ);
+                                    {QPid, QName, MsgId}}, UAMQ);
                 false -> UAMQ
             end,
     State#ch{unacked_message_q = UAMQ1, next_tag = DeliveryTag + 1}.
@@ -2101,8 +2129,8 @@ ack(Acked, State = #ch{queue_names = QNames,
                        queue_states = QueueStates0}) ->
     QueueStates =
         foreach_per_queue(
-          fun ({QPid, CTag}, MsgIds, Acc0) ->
-                  Acc = rabbit_amqqueue:ack(QPid, {CTag, MsgIds}, self(), Acc0),
+          fun ({QPid, QName, CTag}, MsgIds, Acc0) ->
+                  Acc = rabbit_amqqueue:ack(QPid, {CTag, QName, MsgIds}, self(), Acc0),
                   incr_queue_stats(QPid, QNames, MsgIds, State),
                   Acc
           end, Acked, QueueStates0),
@@ -2145,12 +2173,12 @@ notify_queues(State = #ch{consumer_mapping  = Consumers,
 
 foreach_per_queue(_F, [], Acc) ->
     Acc;
-foreach_per_queue(F, [{_DTag, CTag, _Time, {QPid, MsgId}}], Acc) ->
+foreach_per_queue(F, [{_DTag, CTag, _Time, {QPid, QName, MsgId}}], Acc) ->
     %% quorum queue, needs the consumer tag
-    F({QPid, CTag}, [MsgId], Acc);
+    F({QPid, QName, CTag}, [MsgId], Acc);
 foreach_per_queue(F, UAL, Acc) ->
-    T = lists:foldl(fun ({_DTag, CTag, _Time, {QPid, MsgId}}, T) ->
-                            rabbit_misc:gb_trees_cons({QPid, CTag}, MsgId, T)
+    T = lists:foldl(fun ({_DTag, CTag, _Time, {QPid, QName, MsgId}}, T) ->
+                            rabbit_misc:gb_trees_cons({QPid, QName, CTag}, MsgId, T)
                     end, gb_trees:empty(), UAL),
     rabbit_misc:gb_trees_fold(fun (Key, Val, Acc0) -> F(Key, Val, Acc0) end, Acc, T).
 
@@ -2820,7 +2848,7 @@ evaluate_consumer_timeout(State0 = #ch{cfg = #conf{channel = Channel,
                                        unacked_message_q = UAMQ}) ->
     Now = os:system_time(millisecond),
     case ?QUEUE:peek(UAMQ) of
-        {value, {_DTag, ConsumerTag, Time, {_QPid, _Msg}}}
+        {value, {_DTag, ConsumerTag, Time, {_QPid, _QName, _Msg}}}
           when is_integer(Timeout)
                andalso Time < Now - Timeout ->
             rabbit_log_channel:warning("Consumer ~s on channel ~w has timed out "

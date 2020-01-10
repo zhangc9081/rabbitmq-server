@@ -34,17 +34,20 @@ suite() ->
 
 all() ->
     [
-      {group, single_node},
-      {group, clustered}
+      {group, stream},
+      {group, stream2}
     ].
 
 groups() ->
     [
-     {single_node, [], all_tests()},
-     {clustered, [], [
-                      {cluster_size_3, [], []
-                       ++ all_tests()}
-                     ]}
+     {stream, [], [
+                   {single_node, [], all_tests()},
+                   {clustered, [], all_tests()}
+                  ]},
+     {stream2, [], [
+                    {single_node, [], all_tests()},
+                    {clustered, [], all_tests()}
+                   ]}
     ].
 
 all_tests() ->
@@ -68,18 +71,23 @@ init_per_suite(Config0) ->
 end_per_suite(Config) ->
     rabbit_ct_helpers:run_teardown_steps(Config).
 
-init_per_group(clustered, Config) ->
-    rabbit_ct_helpers:set_config(Config, [{rmq_nodes_clustered, true}]);
+init_per_group(stream, Config) ->
+    [{queue_type, <<"stream">>} | Config];
+init_per_group(stream2, Config) ->
+    [{queue_type, <<"stream2">>} | Config];
 init_per_group(Group, Config) ->
-    ClusterSize = case Group of
-                      single_node -> 1;
-                      cluster_size_2 -> 2;
-                      cluster_size_3 -> 3;
-                      cluster_size_5 -> 5
+    ClusterConf = case Group of
+                      clustered ->
+                          [{rmq_nodes_count, 3},
+                           {rmq_nodes_clustered, true}];
+                      single_node ->
+                          [{rmq_nodes_count, 1},
+                           {rmq_nodes_clustered, false}]
                   end,
+
     Config1 = rabbit_ct_helpers:set_config(Config,
-                                           [{rmq_nodes_count, ClusterSize},
-                                            {rmq_nodename_suffix, Group},
+                                           ClusterConf ++
+                                           [{rmq_nodename_suffix, Group},
                                             {tcp_ports_base}]),
     Config1b = rabbit_ct_helpers:set_config(Config1, [{net_ticktime, 10}]),
     Config2 = rabbit_ct_helpers:run_steps(Config1b,
@@ -104,7 +112,9 @@ init_per_group(Group, Config) ->
             Skip
     end.
 
-end_per_group(clustered, Config) ->
+end_per_group(stream, Config) ->
+    Config;
+end_per_group(stream2, Config) ->
     Config;
 end_per_group(_, Config) ->
     rabbit_ct_helpers:run_steps(Config,
@@ -144,7 +154,8 @@ roundtrip(Config) ->
     Ch2 = rabbit_ct_client_helpers:open_channel(Config, lists:last(Servers)),
     QName = ?config(queue_name, Config),
     ?assertEqual({'queue.declare_ok', QName, 0, 0},
-                 declare(Ch, QName, [{<<"x-queue-type">>, longstr, <<"stream">>}])),
+                 declare(Ch, QName, [{<<"x-queue-type">>, longstr,
+                                      ?config(queue_type, Config)}])),
     #'confirm.select_ok'{} = amqp_channel:call(Ch, #'confirm.select'{}),
     CTag1 = <<"ctag1">>,
     subscribe(Ch2, CTag1, QName, 100, [{<<"x-stream-offset">>, long, 0}]),
@@ -154,7 +165,6 @@ roundtrip(Config) ->
                           consumer_tag = CTag1,
                           redelivered  = false}, Msg} ->
             ct:pal("GOT ~w ~w", [DT1, Msg]),
-            flush(100),
             ok
     after 2000 ->
               flush(100),
@@ -166,9 +176,9 @@ roundtrip(Config) ->
                           consumer_tag = CTag1,
                           redelivered  = false}, Msg2} ->
             ct:pal("GOT ~w ~w", [DT2, Msg2]),
-            flush(100),
             ok
     after 2000 ->
+              flush(100),
               exit(basic_deliver_timeout_2)
     end,
     %% another consumer can read
@@ -210,7 +220,8 @@ time_travel(Config) ->
     Ch2 = rabbit_ct_client_helpers:open_channel(Config, lists:last(Servers)),
     QName = ?config(queue_name, Config),
     ?assertEqual({'queue.declare_ok', QName, 0, 0},
-                 declare(Ch, QName, [{<<"x-queue-type">>, longstr, <<"stream">>}])),
+                 declare(Ch, QName, [{<<"x-queue-type">>, longstr,
+                                      ?config(queue_type, Config)}])),
     #'confirm.select_ok'{} = amqp_channel:call(Ch, #'confirm.select'{}),
     CTag1 = <<"ctag1">>,
     publish_many(Ch, QName, 100),
