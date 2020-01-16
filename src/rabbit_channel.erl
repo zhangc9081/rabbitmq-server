@@ -681,7 +681,6 @@ handle_cast({stream_delivery, _CTag, _Msg},
             State = #ch{cfg = #conf{state = closing}}) ->
     noreply(State);
 handle_cast({stream_delivery, ConsumerTag, Msgs}, State0) ->
-    rabbit_log:info("stream delivery ~w", [Msgs]),
     %% streams always require acks for now
     State = lists:foldl(
               fun(Msg, Acc) ->
@@ -766,11 +765,9 @@ handle_info({ra_event, {Name, _} = From, EvtBody} = Evt,
                 consumer_mapping = ConsumerMapping} = State0) ->
     case QueueStates of
         #{Name := QState0} when ?IS_STREAM(QState0) ->
-            % rabbit_log:info("ra event ~w", [Evt]),
             {internal, MsgSeqNos, _Actions, QState1} =
                 rabbit_stream_queue:handle_event(From, EvtBody, QState0),
             State = State0#ch{queue_states = maps:put(Name, QState1, QueueStates)},
-            % rabbit_log:info("ra event msgsenos ~w", [MsgSeqNos]),
             %% TODO: execute actions
             noreply_coalesce(confirm(MsgSeqNos, Name, State));
         #{Name := QState0} ->
@@ -843,7 +840,6 @@ handle_info({ra_event, {Name, _} = From, EvtBody} = Evt,
 
 handle_info({osiris_offset, QName, Offs},
             #ch{queue_states = QueueStates0} = State) ->
-    rabbit_log:info("osiris offset ~w ~w", [QName, Offs]),
     case QueueStates0 of
         #{QName := QState0} when ?IS_STREAM2(QState0) ->
             QState = rabbit_stream2_queue:handle_offset(QState0, Offs),
@@ -2457,6 +2453,8 @@ i(Item, _) ->
 pending_raft_commands(QStates) ->
     maps:fold(fun (_, V, Acc) when ?IS_STREAM(V) ->
                       Acc + rabbit_stream_queue:pending_size(V);
+                  (_, V, Acc) when ?IS_STREAM2(V) ->
+                      Acc;
                   (_, V, Acc) ->
                       Acc + rabbit_fifo_client:pending_size(V)
               end, 0, QStates).
@@ -2742,19 +2740,22 @@ handle_method(#'exchange.declare'{exchange    = ExchangeNameBin,
     _ = rabbit_exchange:lookup_or_die(ExchangeName).
 
 handle_deliver(ConsumerTag, AckRequired,
-               Msg = {_QName, QPid, _MsgId, Redelivered,
+               Msg = {QName, QPid, _MsgId, Redelivered,
                       #basic_message{exchange_name = ExchangeName,
                                      routing_keys  = [RoutingKey | _CcRoutes],
                                      content       = Content}},
                State = #ch{cfg = #conf{writer_pid = WriterPid},
                            next_tag   = DeliveryTag,
+                           queue_states = QStates,
                            writer_gc_threshold = GCThreshold}) ->
     Deliver = #'basic.deliver'{consumer_tag = ConsumerTag,
                                delivery_tag = DeliveryTag,
                                redelivered  = Redelivered,
                                exchange     = ExchangeName#resource.name,
                                routing_key  = RoutingKey},
-    case ?IS_CLASSIC(QPid) of
+    %% hacky check to ensure stream2 is not classed as classic
+    %% QPid could be undefined instead perhaps for stream2
+    case ?IS_CLASSIC(QPid) andalso not maps:is_key(QName, QStates) of
         true ->
             ok = rabbit_writer:send_command_and_notify(
                    WriterPid, QPid, self(), Deliver, Content);

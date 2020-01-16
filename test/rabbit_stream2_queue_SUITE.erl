@@ -14,7 +14,7 @@
 %% Copyright (c) 2018-2019 Pivotal Software, Inc.  All rights reserved.
 %%
 
--module(rabbit_stream_queue_SUITE).
+-module(rabbit_stream2_queue_SUITE).
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
@@ -34,15 +34,15 @@ suite() ->
 
 all() ->
     [
-      {group, stream}
+      {group, stream2}
     ].
 
 groups() ->
     [
-     {stream, [], [
-                   {single_node, [], all_tests()},
-                   {clustered, [], all_tests()}
-                  ]}
+     {stream2, [], [
+                    {single_node, [], all_tests()},
+                    {clustered, [], all_tests()}
+                   ]}
     ].
 
 all_tests() ->
@@ -143,10 +143,10 @@ end_per_testcase(Testcase, Config) ->
 %% -------------------------------------------------------------------
 
 roundtrip(Config) ->
-    [Server | _] = Servers = rabbit_ct_broker_helpers:get_node_configs(Config, nodename),
+    [Server | _] = rabbit_ct_broker_helpers:get_node_configs(Config, nodename),
 
     Ch = rabbit_ct_client_helpers:open_channel(Config, Server),
-    Ch2 = rabbit_ct_client_helpers:open_channel(Config, lists:last(Servers)),
+    Ch2 = rabbit_ct_client_helpers:open_channel(Config, Server),
     QName = ?config(queue_name, Config),
     ?assertEqual({'queue.declare_ok', QName, 0, 0},
                  declare(Ch, QName, [{<<"x-queue-type">>, longstr,
@@ -209,10 +209,10 @@ roundtrip(Config) ->
     ok.
 
 time_travel(Config) ->
-    [Server | _] = Servers = rabbit_ct_broker_helpers:get_node_configs(Config, nodename),
+    [Server | _] = rabbit_ct_broker_helpers:get_node_configs(Config, nodename),
 
     Ch = rabbit_ct_client_helpers:open_channel(Config, Server),
-    Ch2 = rabbit_ct_client_helpers:open_channel(Config, lists:last(Servers)),
+    Ch2 = rabbit_ct_client_helpers:open_channel(Config, Server),
     QName = ?config(queue_name, Config),
     ?assertEqual({'queue.declare_ok', QName, 0, 0},
                  declare(Ch, QName, [{<<"x-queue-type">>, longstr,

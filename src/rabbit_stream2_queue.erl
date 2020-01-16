@@ -61,6 +61,8 @@
 -record(stream, {name :: rabbit_types:r('queue'),
                  credit :: integer(),
                  max = 1000 :: non_neg_integer(),
+                 start_offset = 0 :: non_neg_integer(),
+                 listening_offset = 0 :: non_neg_integer(),
                  log :: undefined | ra_log_reader:state()}).
 
 stream_entries(Name, Id, Str) ->
@@ -68,25 +70,34 @@ stream_entries(Name, Id, Str) ->
 
 stream_entries(Name, LeaderPid,
                #stream{credit = Credit,
+                       start_offset = StartOffs,
+                       listening_offset = LOffs,
                        log = Seg0} = Str0, MsgIn)
   when Credit > 0 ->
-    rabbit_log:info("stream2 entries credit ~b to ~w",
-                    [Credit, Name]),
+    % rabbit_log:info("stream2 entries credit ~b to ~w",
+    %                 [Credit, Name]),
     case osiris_segment:read_chunk_parsed(Seg0) of
         {end_of_stream, Seg} ->
             NextOffset = osiris_segment:next_offset(Seg),
-            osiris_writer:register_offset_listener(LeaderPid, NextOffset),
-            rabbit_log:info("stream2 end_of_stream next offset ~w ~w",
-                            [LeaderPid, NextOffset]),
-            {Str0#stream{log = Seg}, MsgIn};
+            case NextOffset > LOffs of
+                true ->
+                    % rabbit_log:info("stream2 end_of_stream register listener ~w ~w",
+                    %                 [LeaderPid, NextOffset]),
+                    osiris_writer:register_offset_listener(LeaderPid, NextOffset),
+                    {Str0#stream{log = Seg,
+                                 listening_offset = NextOffset}, MsgIn};
+                false ->
+                    {Str0#stream{log = Seg}, MsgIn}
+            end;
         {Records, Seg} ->
             Msgs = [begin
                         Msg0 = binary_to_term(B),
                         Msg = rabbit_basic:add_header(<<"x-stream-offset">>,
                                                       long, O, Msg0),
                         {Name, LeaderPid, O, false, Msg}
-                    end || {O, B} <- Records],
-            rabbit_log:info("stream2 msgs out ~p", [Msgs]),
+                    end || {O, B} <- Records,
+                           O >= StartOffs],
+            % rabbit_log:info("stream2 msgs out ~p", [Msgs]),
             % rabbit_log:info("stream entries got entries", [Entries0]),
             NumMsgs = length(Msgs),
 
@@ -104,7 +115,7 @@ stream_entries(Name, LeaderPid,
             end
     end;
 stream_entries(_Name, _Id, Str, Msgs) ->
-    rabbit_log:info("stream entries none ~w", [Str]),
+    % rabbit_log:info("stream entries none ~w", [Str]),
     {Str, Msgs}.
 
 %% CLIENT
@@ -119,7 +130,7 @@ stream_entries(_Name, _Id, Str, Msgs) ->
                         }).
 
 init_client(Q) when ?is_amqqueue(Q) ->
-    rabbit_log:info("init_client", []),
+    % rabbit_log:info("init_client", []),
     Leader = amqqueue:get_pid(Q),
     #stream2_client{name = amqqueue:get_name(Q),
                     leader = Leader}.
@@ -133,7 +144,7 @@ pending_size(#stream2_client{correlation = Correlation}) ->
 append(#stream2_client{leader = LeaderPid,
                        next_seq = Seq,
                        correlation = Correlation0} = State, MsgId, Event) ->
-    rabbit_log:info("stream2 append none ~w", [MsgId]),
+    % rabbit_log:info("stream2 append none ~w", [MsgId]),
     ok = osiris:write(LeaderPid, Seq, term_to_binary(Event)),
     Correlation = case MsgId of
                       undefined ->
@@ -163,7 +174,14 @@ begin_stream(#stream2_client{leader = Leader,
             NextOffset = osiris_segment:next_offset(Seg0) - 1,
             osiris_writer:register_offset_listener(Leader, NextOffset),
             %% TODO: avoid double calls to the same process
+            StartOffset = case Offset of
+                              undefined -> NextOffset;
+                              _ ->
+                                  Offset
+                          end,
             Str0 = #stream{credit = Max,
+                           start_offset = StartOffset,
+                           listening_offset = NextOffset,
                            log = Seg0,
                            max = Max},
             State#stream2_client{readers = Readers0#{Tag => Str0}};
@@ -171,13 +189,14 @@ begin_stream(#stream2_client{leader = Leader,
             exit(non_local_stream2_readers_not_supported)
     end.
 
-end_stream(#stream2_client{} = State, _Tag) ->
-    State.
+end_stream(#stream2_client{readers = Readers0} = State, Tag) ->
+    Readers = maps:remove(Tag, Readers0),
+    State#stream2_client{readers = Readers}.
 
 handle_offset(#stream2_client{name = Name,
                               leader = Leader,
                               readers = Readers0} = State, _Offs) ->
-    rabbit_log:info("handle_offset ~w", [_Offs]),
+    % rabbit_log:info("handle_offset ~w", [_Offs]),
     %% offset isn't actually needed as we use the atomic to read the
     %% current committed
     Readers = maps:map(
@@ -195,10 +214,10 @@ handle_offset(#stream2_client{name = Name,
 credit(#stream2_client{name = Name,
                        leader = Leader,
                        readers = Readers0} = State, Tag, Credit) ->
-    rabbit_log:info("stream2 credit ~w ~w", [Credit, Tag]),
+    % rabbit_log:info("stream2 credit ~w ~w", [Credit, Tag]),
     Readers = case Readers0 of
                   #{Tag := #stream{credit = Credit0} = Str0} ->
-                      rabbit_log:info("stream2 credit yeah ~w ~w", [Credit, Tag]),
+                      % rabbit_log:info("stream2 credit yeah ~w ~w", [Credit, Tag]),
                       Str1 = Str0#stream{credit = Credit0 + Credit},
                       {Str, Msgs} = stream_entries(Name, Leader, Str1),
                       %% HACK for now, better to just return but
@@ -223,7 +242,7 @@ declare(Q0) ->
     N = ra_lib:derive_safe_string(atom_to_list(Name), 8),
     Dir = filename:join(rabbit_mnesia:dir(), "streams"),
     file:make_dir(Dir),
-    rabbit_log:info("Declare stream2 in ~s", [Dir]),
+    % rabbit_log:info("Declare stream2 in ~s", [Dir]),
     Conf = #{dir => Dir,
              reference => QName},
     {ok, LeaderPid, ReplicaPids} = osiris:start_cluster(N, Replicas, Conf),
