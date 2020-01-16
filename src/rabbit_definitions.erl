@@ -22,8 +22,13 @@
 %% import
 -export([import_raw/1, import_raw/2, import_parsed/1, import_parsed/2,
          apply_defs/2, apply_defs/3, apply_defs/4, apply_defs/5]).
-%% export
+
 -export([all_definitions/0]).
+-export([
+  list_users/0, list_vhosts/0, list_permissions/0, list_topic_permissions/0,
+  list_runtime_parameters/0, list_global_runtime_parameters/0, list_policies/0,
+  list_exchanges/0, list_queues/0, list_bindings/0
+]).
 -export([decode/1, decode/2, args/1]).
 
 -import(rabbit_misc, [pget/2]).
@@ -633,10 +638,10 @@ vhost_definition(VHost) ->
 list_users() ->
     [begin
          {ok, User} = rabbit_auth_backend_internal:lookup_user(pget(user, U)),
-         #{name              => User#internal_user.username,
-           password_hash     => base64:encode(User#internal_user.password_hash),
-           hashing_algorithm => rabbit_auth_backend_internal:hashing_module_for_user(User),
-           tags              => tags_as_binaries(User#internal_user.tags)
+         #{<<"name">>              => User#internal_user.username,
+           <<"password_hash">>     => base64:encode(User#internal_user.password_hash),
+           <<"hashing_algorithm">> => rabbit_auth_backend_internal:hashing_module_for_user(User),
+           <<"tags">>              => tags_as_binaries(User#internal_user.tags)
          }
      end || U <- rabbit_auth_backend_internal:list_users()].
 
@@ -654,8 +659,9 @@ runtime_parameter_definition(Param) ->
 list_global_runtime_parameters() ->
     [global_runtime_parameter_definition(P) || P <- rabbit_runtime_parameters:list_global()].
 
-global_runtime_parameter_definition(Param) ->
-    maps:from_list(Param).
+global_runtime_parameter_definition(P0) ->
+    P = [{rabbit_data_coercion:to_binary(K), V} || {K, V} <- P0],
+    maps:from_list(P).
 
 list_policies() ->
     [policy_definition(P) || P <- rabbit_policy:list()].
@@ -673,13 +679,15 @@ policy_definition(Policy) ->
 list_permissions() ->
     [permission_definition(P) || P <- rabbit_auth_backend_internal:list_permissions()].
 
-permission_definition(P) ->
+permission_definition(P0) ->
+    P = [{rabbit_data_coercion:to_binary(K), V} || {K, V} <- P0],
     maps:from_list(P).
 
 list_topic_permissions() ->
     [topic_permission_definition(P) || P <- rabbit_auth_backend_internal:list_topic_permissions()].
 
-topic_permission_definition(P) ->
+topic_permission_definition(P0) ->
+    P = [{rabbit_data_coercion:to_binary(K), V} || {K, V} <- P0],
     maps:from_list(P).
 
 tags_as_binaries(Tags) ->
