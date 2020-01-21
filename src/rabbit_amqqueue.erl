@@ -1591,13 +1591,14 @@ ack(QPid, {CTag, QName, MsgIds}, ChPid, QueueStates) when ?IS_CLASSIC(QPid) ->
         #{QName := QState0}
           when element(1, QState0) == stream2_client ->
             %% stream2 cqueue
-            {ok, QState} = rabbit_stream2_queue:credit(QState0, CTag,
-                                                      length(MsgIds)),
-            maps:put(QName, QState, QueueStates);
+            {ok, Messages, QState} = rabbit_stream2_queue:credit(QState0, CTag,
+                                                                 length(MsgIds)),
+            {maps:put(QName, QState, QueueStates), Messages};
         _ ->
             %% classic
-            delegate:invoke_no_result(QPid, {gen_server2, cast, [{ack, MsgIds, ChPid}]}),
-            QueueStates
+            delegate:invoke_no_result(QPid, {gen_server2, cast,
+                                             [{ack, MsgIds, ChPid}]}),
+            {QueueStates, []}
     end;
 ack({Name, _} = QPid, {CTag, MsgIds}, _ChPid, QuorumStates)
   when ?IS_QUORUM(QPid) ->
@@ -1610,13 +1611,13 @@ ack({Name, _} = QPid, {CTag, MsgIds}, _ChPid, QuorumStates)
             %% rather than an explicit msgid
             {ok, QState} = rabbit_stream_queue:credit(QState0, CTag,
                                                       length(MsgIds)),
-            maps:put(Name, QState, QuorumStates);
+            {maps:put(Name, QState, QuorumStates), []};
         #{Name := QState0} ->
             {ok, QState} = rabbit_quorum_queue:ack(CTag, MsgIds, QState0),
-            maps:put(Name, QState, QuorumStates);
+            {maps:put(Name, QState, QuorumStates), []};
         _ ->
             %% queue was not found
-            QuorumStates
+            {QuorumStates, []}
     end.
 
 -spec reject(pid() | amqqueue:ra_server_id(),

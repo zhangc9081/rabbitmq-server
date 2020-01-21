@@ -96,7 +96,7 @@ define PROJECT_ENV
 	    {msg_store_io_batch_size, 4096},
 	    %% see rabbitmq-server#143,
 	    %% rabbitmq-server#949, rabbitmq-server#1098
-	    {credit_flow_default_credit, {400, 200}},
+	    {credit_flow_default_credit, {4000, 2000}},
 	    {quorum_commands_soft_limit, 256},
 	    {quorum_cluster_size, 5},
 	    %% see rabbitmq-server#248

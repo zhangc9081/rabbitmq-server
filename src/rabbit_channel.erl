@@ -840,10 +840,20 @@ handle_info({ra_event, {Name, _} = From, EvtBody} = Evt,
 
 handle_info({osiris_offset, QName, Offs},
             #ch{queue_states = QueueStates0} = State) ->
+    % rabbit_log:info("osiris_offset ~w ~w ~w", [QName, Offs, QueueStates0]),
     case QueueStates0 of
         #{QName := QState0} when ?IS_STREAM2(QState0) ->
-            QState = rabbit_stream2_queue:handle_offset(QState0, Offs),
-            noreply(State#ch{queue_states = QueueStates0#{QName => QState}});
+            {QState, TagMsgs} = rabbit_stream2_queue:handle_offset(QState0, Offs),
+            % rabbit_log:info("osiris_offset tag msgs ~w", [TagMsgs]),
+            noreply(
+              lists:foldl(
+                fun({Tag, LeaderPid, OffsetMsgs}, Acc) ->
+                        handle_stream_deliveries(Tag, LeaderPid,
+                                                 QName, OffsetMsgs, Acc)
+                end,
+                State#ch{queue_states = QueueStates0#{QName => QState}},
+                TagMsgs)
+             );
         _ ->
             noreply(State)
     end;
@@ -951,6 +961,7 @@ handle_post_hibernate(State0) ->
 
 terminate(_Reason,
           State = #ch{cfg = #conf{user = #user{username = Username}}}) ->
+    rabbit_log:warning("terminate with ~w", [_Reason]),
     {_Res, _State1} = notify_queues(State),
     pg_local:leave(rabbit_channels, self()),
     rabbit_event:if_enabled(State, #ch.stats_timer,
@@ -2121,24 +2132,28 @@ collect_acks(ToAcc, PrefixAcc, Q, DeliveryTag, Multiple) ->
     end.
 
 %% NB: Acked is in youngest-first order
-ack(Acked, State = #ch{queue_names = QNames,
-                       queue_states = QueueStates0}) ->
-    QueueStates =
-        foreach_per_queue(
-          fun ({QPid, QName, CTag}, MsgIds, Acc0) ->
-                  Acc = rabbit_amqqueue:ack(QPid, {CTag, QName, MsgIds}, self(), Acc0),
-                  incr_queue_stats(QPid, QNames, MsgIds, State),
-                  Acc
-          end, Acked, QueueStates0),
+ack(Acked, State) ->
     ok = notify_limiter(State#ch.limiter, Acked),
-    State#ch{queue_states = QueueStates}.
+    foreach_per_queue(
+      fun ({QPid, QName, CTag}, MsgIds,
+           #ch{queue_states = QS0} = Acc) ->
+              {QS, {_, _, OffsetMsgs}} = rabbit_amqqueue:ack(QPid,
+                                                             {CTag, QName, MsgIds},
+                                                             self(), QS0),
+              incr_queue_stats(QName, MsgIds, State),
+              handle_stream_deliveries(CTag, QPid,
+                                       QName, OffsetMsgs,
+                                       Acc#ch{queue_states = QS})
+      end, Acked, State).
+        % lists:foldl(
+        %   fun({Tag, LeaderPid, OffsetMsgs}, Acc) ->
+        %           handle_stream_deliveries(Tag, LeaderPid,
+        %                                    QName, OffsetMsgs, Acc)
+        %   end, State#ch{queue_states = QueueStates}, TagMessages).
 
-incr_queue_stats(QPid, QNames, MsgIds, State) ->
-    case maps:find(qpid_to_ref(QPid), QNames) of
-        {ok, QName} -> Count = length(MsgIds),
-                       ?INCR_STATS(queue_stats, QName, Count, ack, State);
-        error       -> ok
-    end.
+incr_queue_stats(QName, MsgIds, State) ->
+        Count = length(MsgIds),
+        ?INCR_STATS(queue_stats, QName, Count, ack, State).
 
 %% {Msgs, Acks}
 %%
@@ -2738,6 +2753,42 @@ handle_method(#'exchange.declare'{exchange    = ExchangeNameBin,
     ExchangeName = rabbit_misc:r(VHostPath, exchange, strip_cr_lf(ExchangeNameBin)),
     check_not_default_exchange(ExchangeName),
     _ = rabbit_exchange:lookup_or_die(ExchangeName).
+
+handle_stream_deliveries(_ConsumerTag, _QPid, _QName, [], State) ->
+    State;
+handle_stream_deliveries(ConsumerTag, QPid, QName, MsgBins,
+                         #ch{cfg = #conf{writer_pid = WriterPid},
+                             writer_gc_threshold = GCThreshold,
+                             unacked_message_q = UAMQ0,
+                             next_tag = NextTag0} = State) ->
+    % rabbit_log:info("handle stream deliveries ~w ~w", [QName, hd(MsgBins)]),
+    DeliveredAt = os:system_time(millisecond),
+    {NextTag, Bins, UAMQ} =
+        lists:foldl(
+          fun ({Offs, Bin}, {DTag, Bins, UAMQ}) ->
+                  #basic_message{exchange_name = ExchangeName,
+                                 routing_keys = [RoutingKey | _CcRoutes],
+                                 content = Content} = binary_to_term(Bin),
+                  Deliver = #'basic.deliver'{consumer_tag = ConsumerTag,
+                                             delivery_tag = DTag,
+                                             redelivered  = false,
+                                             exchange     = ExchangeName#resource.name,
+                                             routing_key  = RoutingKey},
+                  ok = rabbit_writer:send_command(WriterPid, Deliver,
+                                                  Content),
+                  {DTag +1, [Bin | Bins],
+                   ?QUEUE:in({DTag, ConsumerTag, DeliveredAt,
+                                       {QPid, QName, Offs}}, UAMQ)}
+          end, {NextTag0, [], UAMQ0}, MsgBins),
+    % rabbit_log:info("handle stream deliveries next tag ~w", [NextTag]),
+    case GCThreshold of
+        undefined -> ok;
+        _ ->
+            rabbit_basic:maybe_gc_large_msg(Bins, GCThreshold)
+    end,
+    ?INCR_STATS(queue_stats, QName, NextTag - NextTag0, deliver, State),
+    State#ch{next_tag = NextTag,
+             unacked_message_q = UAMQ}.
 
 handle_deliver(ConsumerTag, AckRequired,
                Msg = {QName, QPid, _MsgId, Redelivered,

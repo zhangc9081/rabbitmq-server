@@ -70,7 +70,7 @@ stream_entries(Name, Id, Str) ->
 
 stream_entries(Name, LeaderPid,
                #stream{credit = Credit,
-                       start_offset = StartOffs,
+                       start_offset = _StartOffs,
                        listening_offset = LOffs,
                        log = Seg0} = Str0, MsgIn)
   when Credit > 0 ->
@@ -90,13 +90,11 @@ stream_entries(Name, LeaderPid,
                     {Str0#stream{log = Seg}, MsgIn}
             end;
         {Records, Seg} ->
-            Msgs = [begin
-                        Msg0 = binary_to_term(B),
-                        Msg = rabbit_basic:add_header(<<"x-stream-offset">>,
-                                                      long, O, Msg0),
-                        {Name, LeaderPid, O, false, Msg}
-                    end || {O, B} <- Records,
-                           O >= StartOffs],
+            % Msgs = [begin
+            %             R
+            %         end || {O, _} = R <- Records,
+            %                O >= StartOffs],
+            Msgs = Records,
             % rabbit_log:info("stream2 msgs out ~p", [Msgs]),
             % rabbit_log:info("stream entries got entries", [Entries0]),
             NumMsgs = length(Msgs),
@@ -106,7 +104,7 @@ stream_entries(Name, LeaderPid,
             case Str#stream.credit < 1 of
                 true ->
                     %% we are done here
-                    % rabbit_log:info("stream entries out ~w ~w", [Entries0, Msgs]),
+                    % rabbit_log:info("stream entries out ~w ~w", [Msgs, Msgs]),
                     {Str, MsgIn ++ Msgs};
                 false ->
                     %% if there are fewer Msgs than Entries0 it means there were non-events
@@ -199,36 +197,33 @@ handle_offset(#stream2_client{name = Name,
     % rabbit_log:info("handle_offset ~w", [_Offs]),
     %% offset isn't actually needed as we use the atomic to read the
     %% current committed
-    Readers = maps:map(
-                fun (Tag, Str0) ->
-                        {Str, Msgs} = stream_entries(Name, Leader, Str0),
-                        %% HACK for now, better to just return but
-                        %% tricky with acks credits
-                        %% that also evaluate the stream
-                        gen_server:cast(self(), {stream_delivery, Tag, Msgs}),
-                        Str
-                end, Readers0),
-    State#stream2_client{readers = Readers}.
+    {Readers, TagMsgs} = maps:fold(
+                           fun (Tag, Str0, {Acc, TM}) ->
+                                   % rabbit_log:info("handle_offset for  ~w", [Tag]),
+                                   {Str, Msgs} = stream_entries(Name, Leader, Str0),
+                                   %% HACK for now, better to just return but
+                                   %% tricky with acks credits
+                                   %% that also evaluate the stream
+                                   % gen_server:cast(self(), {stream_delivery, Tag, Msgs}),
+                                   {Acc#{Tag => Str}, [{Tag, Leader, Msgs} | TM]}
+                           end, {#{}, []}, Readers0),
+    {State#stream2_client{readers = Readers}, TagMsgs}.
 
 
 credit(#stream2_client{name = Name,
                        leader = Leader,
                        readers = Readers0} = State, Tag, Credit) ->
     % rabbit_log:info("stream2 credit ~w ~w", [Credit, Tag]),
-    Readers = case Readers0 of
-                  #{Tag := #stream{credit = Credit0} = Str0} ->
-                      % rabbit_log:info("stream2 credit yeah ~w ~w", [Credit, Tag]),
-                      Str1 = Str0#stream{credit = Credit0 + Credit},
-                      {Str, Msgs} = stream_entries(Name, Leader, Str1),
-                      %% HACK for now, better to just return but
-                      %% tricky with acks credits
-                      %% that also evaluate the stream
-                      gen_server:cast(self(), {stream_delivery, Tag, Msgs}),
-                      Readers0#{Tag => Str};
-                  _ ->
-                      Readers0
-              end,
-    {ok, State#stream2_client{readers = Readers}}.
+    {Readers, TagMsgs} = case Readers0 of
+                          #{Tag := #stream{credit = Credit0} = Str0} ->
+                              % rabbit_log:info("stream2 credit yeah ~w ~w", [Credit, Tag]),
+                              Str1 = Str0#stream{credit = Credit0 + Credit},
+                              {Str, Msgs0} = stream_entries(Name, Leader, Str1),
+                              {Readers0#{Tag => Str}, {Tag, Leader, Msgs0}};
+                          _ ->
+                              {Readers0, []}
+                      end,
+    {ok, TagMsgs, State#stream2_client{readers = Readers}}.
 
 %% MGMT
 
@@ -240,12 +235,9 @@ declare(Q0) ->
     ActingUser = maps:get(user, Opts, ?UNKNOWN_USER),
     Replicas = rabbit_mnesia:cluster_nodes(all) -- [node()],
     N = ra_lib:derive_safe_string(atom_to_list(Name), 8),
-    Dir = filename:join(rabbit_mnesia:dir(), "streams"),
-    file:make_dir(Dir),
     % rabbit_log:info("Declare stream2 in ~s", [Dir]),
-    Conf = #{dir => Dir,
-             reference => QName,
-             name => N},
+    Conf = #{name => N,
+             reference => QName},
     {ok, LeaderPid, ReplicaPids} = osiris:start_cluster(N, Replicas, Conf),
     Q1 = amqqueue:set_slave_pids(
            amqqueue:set_pid(Q0, LeaderPid), ReplicaPids),

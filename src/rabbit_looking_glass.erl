@@ -19,39 +19,58 @@
 -ignore_xref([{lg, trace, 4}]).
 -ignore_xref([{maps, from_list, 1}]).
 
--export([boot/0]).
--export([connections/0]).
+-export([boot/0,
+         stop/0]).
+-export([connections/0,
+         channels/0]).
+-export([profile_channels/0]).
 
 boot() ->
     case os:getenv("RABBITMQ_TRACER") of
         false ->
             ok;
         Value ->
-            Input = parse_value(Value),
+            % Input = parse_value(Value),
             rabbit_log:info(
                 "Enabling Looking Glass profiler, input value: ~p",
-                [Input]
+                [Value]
             ),
             {ok, _} = application:ensure_all_started(looking_glass),
-            lg:trace(
-                Input,
-                lg_file_tracer,
-                "traces.lz4",
-                maps:from_list([
-                    {mode, profile},
-                    {process_dump, true},
-                    {running, true},
-                    {send, true}]
-                )
-             )
+            ok
     end.
 
-parse_value(Value) ->
-    [begin
-        [Mod, Fun] = string:tokens(C, ":"),
-        {callback, list_to_atom(Mod), list_to_atom(Fun)}
-    end || C <- string:tokens(Value, ",")].
+% parse_value(Value) ->
+%     [begin
+%         [Mod, Fun] = string:tokens(C, ":"),
+%         {callback, list_to_atom(Mod), list_to_atom(Fun)}
+%     end || C <- string:tokens(Value, ",")].
 
 connections() ->
     Pids = [Pid || {{conns_sup, _}, Pid} <- ets:tab2list(ranch_server)],
     ['_', {scope, Pids}].
+
+channels() ->
+    Pids = rabbit_channel:list_local(),
+    ['_', {scope, Pids}].
+
+profile_channels() ->
+    lg:trace(
+      [
+       rabbit_channel,
+       rabbit_amqqueue,
+       rabbit_stream2_queue,
+       osiris_segment,
+       rabbit_basic,
+       rabbit_writer,
+       lqueue
+      ],
+      lg_file_tracer,
+      "traces.lz4",
+      maps:from_list([
+                      {mode, profile},
+                      {process_dump, false},
+                      {send, false}]
+                    )).
+
+stop() ->
+    lg:stop().
