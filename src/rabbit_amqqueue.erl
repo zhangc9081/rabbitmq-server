@@ -126,8 +126,10 @@ warn_file_limit() ->
 recover(VHost) ->
     AllClassic = find_local_durable_classic_queues(VHost),
     Quorum = find_local_quorum_queues(VHost),
+    Stream2 = find_stream2_queues(VHost),
     {RecoveredClassic, FailedClassic} = recover_classic_queues(VHost, AllClassic),
-    {RecoveredClassic, FailedClassic, rabbit_ra_queue:recover(Quorum)}.
+    RecoveredStream2 = recover_stream2_queues(Stream2),
+    {RecoveredClassic, FailedClassic, rabbit_ra_queue:recover(Quorum), RecoveredStream2}.
 
 recover_classic_queues(VHost, Queues) ->
     {ok, BQ} = application:get_env(rabbit, backing_queue_module),
@@ -147,6 +149,14 @@ recover_classic_queues(VHost, Queues) ->
             rabbit_log:error("Failed to start queue supervisor for vhost '~s': ~s", [VHost, Reason]),
             throw({error, Reason})
     end.
+
+recover_stream2_queues(Queues) ->
+    lists:foldl(fun(Q, Acc) ->
+                        case rabbit_stream2_queue:recover(Q) of
+                            ok -> [Q | Acc];
+                            _Error -> Acc
+                        end
+                end, [], Queues).
 
 filter_pid_per_type(QPids) ->
     lists:partition(fun(QPid) -> ?IS_CLASSIC(QPid) end, QPids).
@@ -203,6 +213,14 @@ find_local_quorum_queues(VHost) ->
                                 amqqueue:get_vhost(Q) =:= VHost,
                                 (amqqueue:is_quorum(Q) orelse amqqueue:is_stream(Q)) andalso
                                 (lists:member(Node, get_quorum_nodes(Q)))]))
+      end).
+
+find_stream2_queues(VHost) ->
+    mnesia:async_dirty(
+      fun () ->
+              qlc:e(qlc:q([Q || Q <- mnesia:table(rabbit_durable_queue),
+                                amqqueue:get_vhost(Q) =:= VHost,
+                                amqqueue:is_stream2(Q)]))
       end).
 
 find_local_durable_classic_queues(VHost) ->

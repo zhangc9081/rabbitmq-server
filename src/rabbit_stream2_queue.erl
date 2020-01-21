@@ -24,9 +24,9 @@
 
          %% other
          open_files/1,
-         cluster_state/1
-
-
+         cluster_state/1,
+         
+         recover/1
          ]).
 
 -define(DELETE_TIMEOUT, 5000).
@@ -244,11 +244,13 @@ declare(Q0) ->
     file:make_dir(Dir),
     % rabbit_log:info("Declare stream2 in ~s", [Dir]),
     Conf = #{dir => Dir,
-             reference => QName},
+             reference => QName,
+             name => N},
     {ok, LeaderPid, ReplicaPids} = osiris:start_cluster(N, Replicas, Conf),
     Q1 = amqqueue:set_slave_pids(
            amqqueue:set_pid(Q0, LeaderPid), ReplicaPids),
-    case rabbit_amqqueue:internal_declare(Q1, false) of
+    NewQ1 = amqqueue:set_type_state(Q1, Conf),
+    case rabbit_amqqueue:internal_declare(NewQ1, false) of
         {created, Q} ->
             rabbit_event:notify(queue_created,
                                 [{name, QName},
@@ -267,6 +269,77 @@ declare(Q0) ->
         {existing, _} = Ex ->
             Ex
     end.
+
+recover(Q0) ->
+    Node = node(),
+    Conf = amqqueue:get_type_state(Q0),
+    Name = maps:get(name, Conf),
+    QName = amqqueue:get_name(Q0),
+    Pid = amqqueue:get_pid(Q0),
+    case node(Pid) of
+        Node ->
+            Replicas = rabbit_mnesia:cluster_nodes(all) -- [node()],
+            {ok, LeaderPid} = osiris:restart_server(Name, Replicas, Conf),
+            Q = amqqueue:set_pid(Q0, LeaderPid),
+            {ok, _} = rabbit_amqqueue:ensure_rabbit_queue_record_is_initialized(Q),
+            Slaves = restart_replicas_on_nodes(Name, LeaderPid, Replicas, Conf),
+            update_slaves(QName, Slaves);
+        _ ->
+            restart_replica(Name, Pid, Node, Conf, QName)
+    end.
+
+restart_replica(Name, LeaderPid, Node, Conf, QName) ->
+    case rabbit_misc:is_process_alive(LeaderPid) of
+        true ->
+            case osiris:restart_replica(Name, LeaderPid, Node, Conf) of
+                {ok, ReplicaPid} ->
+                    update_slaves(QName, [ReplicaPid]);
+                {error, already_present} ->
+                    ok;
+                {error, {already_started, _}} ->
+                    ok;
+                Error ->
+                    rabbit_log:warning("Error starting stream ~p replica: ~p",
+                                       [Name, Error]),
+                    {error, replica_not_started}
+            end;
+        false ->
+            rabbit_log:debug("Stream ~p writer is down, the replica on this node"
+                             " will be started by the writer", [Name]),
+            {error, replica_not_started}
+    end.
+
+restart_replicas_on_nodes(Name, LeaderPid, Replicas, Conf) ->
+    lists:foldl(
+      fun(Replica, Pids) ->
+              try
+                  case osiris:restart_replica(Name, LeaderPid, Replica, Conf) of
+                      {ok, Pid} ->
+                          [Pid | Pids];
+                      {error, already_present} ->
+                                           ok;
+                      {error, {already_started, _}} ->
+                                           ok;
+                      Error ->
+                          rabbit_log:warning("Error starting stream ~p replica on node ~p: ~p",
+                                             [Name, Replica, Error]),
+                          Pids
+                  end
+              catch
+                  _:_ ->
+                      %% Node is not yet up, this is normal
+                      Pids
+              end
+      end, [], Replicas).
+
+update_slaves(QName, Slaves0) ->
+    Fun = fun (Q) ->
+                  Slaves = amqqueue:get_slave_pids(Q) ++ Slaves0,
+                  amqqueue:set_slave_pids(Q, Slaves)
+          end,
+    rabbit_misc:execute_mnesia_transaction(
+      fun() -> rabbit_amqqueue:update(QName, Fun) end),
+    ok.
 
 delete(Q, ActingUser) when ?amqqueue_is_stream2(Q) ->
     {Name, _} = amqqueue:get_pid(Q),
