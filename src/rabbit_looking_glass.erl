@@ -60,8 +60,10 @@ profile_channels() ->
        rabbit_amqqueue,
        rabbit_stream2_queue,
        osiris_segment,
+       osiris_writer,
        rabbit_basic,
        rabbit_writer,
+       rabbit_reader,
        lqueue
       ],
       lg_file_tracer,

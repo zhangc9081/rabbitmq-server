@@ -171,7 +171,8 @@
              queue_states,
              tick_timer,
              %% defines how ofter gc will be executed
-             writer_gc_threshold
+             writer_gc_threshold,
+             last_msg_cache
             }).
 
 -define(QUEUE, lqueue).
@@ -1361,39 +1362,63 @@ handle_method(#'basic.publish'{immediate = true}, _Content, _State) ->
 handle_method(#'basic.publish'{exchange    = ExchangeNameBin,
                                routing_key = RoutingKey,
                                mandatory   = Mandatory},
-              Content, State = #ch{cfg = #conf{channel = ChannelNum,
-                                               conn_name = ConnName,
-                                               virtual_host = VHostPath,
-                                               user = #user{username = Username} = User,
-                                               trace_state = TraceState,
-                                               max_message_size = MaxMessageSize,
-                                               authz_context = AuthzContext
-                                              },
-                                   tx               = Tx,
-                                   confirm_enabled  = ConfirmEnabled,
-                                   delivery_flow    = Flow,
-                                   writer_gc_threshold     = GCThreshold
-                                   }) ->
-    check_msg_size(Content, MaxMessageSize, GCThreshold),
-    ExchangeName = rabbit_misc:r(VHostPath, exchange, ExchangeNameBin),
-    check_write_permitted(ExchangeName, User, AuthzContext),
-    Exchange = rabbit_exchange:lookup_or_die(ExchangeName),
-    check_internal_exchange(Exchange),
-    check_write_permitted_on_topic(Exchange, User, RoutingKey, AuthzContext),
-    %% We decode the content's properties here because we're almost
-    %% certain to want to look at delivery-mode and priority.
-    DecodedContent = #content {properties = Props} =
-        maybe_set_fast_reply_to(
-          rabbit_binary_parser:ensure_content_decoded(Content), State),
-    check_user_id_header(Props, State),
-    check_expiration_header(Props),
+              #content{properties_bin = PBin} = Content,
+              State = #ch{cfg = #conf{channel = ChannelNum,
+                                      conn_name = ConnName,
+                                      virtual_host = VHostPath,
+                                      user = #user{username = Username} = User,
+                                      trace_state = TraceState,
+                                      max_message_size = MaxMessageSize,
+                                      authz_context = AuthzContext
+                                     },
+                          tx               = Tx,
+                          confirm_enabled  = ConfirmEnabled,
+                          delivery_flow    = Flow,
+                          writer_gc_threshold     = _GCThreshold,
+                          last_msg_cache = LastMsgCache0
+                         }) ->
+    %% TODO: stash last basic.publish record and check if it is different
+    %% before executing this code
+    {DecodedContent, LastMsgCache = {_, _, _, ExchangeName, Exchange}} =
+    case LastMsgCache0 of
+        {PBin, Props, ExchangeNameBin, _ExchangeName, _Exchange} = Last ->
+            %% same as last - skip permissions checks
+            DC = Content#content{properties = Props,
+                                 properties_bin = none},
+            {DC, Last};
+        _ ->
+            % rabbit_log:info("updating last msg cache!!", []),
+            check_msg_size(Content, MaxMessageSize, undefined),
+            %% not the same - do all checks
+            ExchangeName0 = rabbit_misc:r(VHostPath, exchange, ExchangeNameBin),
+            check_write_permitted(ExchangeName0, User, AuthzContext),
+            Exchange0 = rabbit_exchange:lookup_or_die(ExchangeName0),
+            check_internal_exchange(Exchange0),
+            check_write_permitted_on_topic(Exchange0, User, RoutingKey,
+                                           AuthzContext),
+            %% We decode the content's properties here because we're almost
+            %% certain to want to look at delivery-mode and priority.
+
+            DC = #content {properties = Props} =
+            maybe_set_fast_reply_to(
+              rabbit_binary_parser:ensure_content_decoded(Content), State),
+            %% TODO: check the binary properties are different to the last received
+            %% before executing this code
+            check_user_id_header(Props, State),
+            check_expiration_header(Props),
+        {DC, {PBin, Props, ExchangeNameBin, ExchangeName0, Exchange0}}
+    end,
+
     DoConfirm = Tx =/= none orelse ConfirmEnabled,
     {MsgSeqNo, State1} =
         case DoConfirm orelse Mandatory of
-            false -> {undefined, State};
+            false -> {undefined, State#ch{last_msg_cache = LastMsgCache}};
             true  -> SeqNo = State#ch.publish_seqno,
-                     {SeqNo, State#ch{publish_seqno = SeqNo + 1}}
+                     {SeqNo, State#ch{last_msg_cache = LastMsgCache,
+                                      publish_seqno = SeqNo + 1}}
         end,
+    %% here we need the decoded content
+    %% perhaps we can use the props with the new body
     case rabbit_basic:message(ExchangeName, RoutingKey, DecodedContent) of
         {ok, Message} ->
             Delivery = rabbit_basic:delivery(

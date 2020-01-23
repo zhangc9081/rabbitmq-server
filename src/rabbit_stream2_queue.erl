@@ -83,7 +83,7 @@ stream_entries(Name, LeaderPid,
                 true ->
                     % rabbit_log:info("stream2 end_of_stream register listener ~w ~w",
                     %                 [LeaderPid, NextOffset]),
-                    osiris_writer:register_offset_listener(LeaderPid, NextOffset),
+                    % osiris_writer:register_offset_listener(LeaderPid, NextOffset),
                     {Str0#stream{log = Seg,
                                  listening_offset = NextOffset}, MsgIn};
                 false ->
@@ -113,7 +113,7 @@ stream_entries(Name, LeaderPid,
             end
     end;
 stream_entries(_Name, _Id, Str, Msgs) ->
-    % rabbit_log:info("stream entries none ~w", [Str]),
+    % rabbit_log:info("stream entries none ~w", [Str#stream.credit]),
     {Str, Msgs}.
 
 %% CLIENT
@@ -170,7 +170,7 @@ begin_stream(#stream2_client{leader = Leader,
         true ->
             Seg0 = osiris_writer:init_reader(Leader, Offset),
             NextOffset = osiris_segment:next_offset(Seg0) - 1,
-            osiris_writer:register_offset_listener(Leader, NextOffset),
+            osiris_writer:register_offset_listener(Leader),
             %% TODO: avoid double calls to the same process
             StartOffset = case Offset of
                               undefined -> NextOffset;
@@ -194,7 +194,6 @@ end_stream(#stream2_client{readers = Readers0} = State, Tag) ->
 handle_offset(#stream2_client{name = Name,
                               leader = Leader,
                               readers = Readers0} = State, _Offs) ->
-    % rabbit_log:info("handle_offset ~w", [_Offs]),
     %% offset isn't actually needed as we use the atomic to read the
     %% current committed
     {Readers, TagMsgs} = maps:fold(
@@ -207,6 +206,7 @@ handle_offset(#stream2_client{name = Name,
                                    % gen_server:cast(self(), {stream_delivery, Tag, Msgs}),
                                    {Acc#{Tag => Str}, [{Tag, Leader, Msgs} | TM]}
                            end, {#{}, []}, Readers0),
+    % rabbit_log:info("handle_offset ~w num msgs ~w", [_Offs, length(TagMsgs)]),
     {State#stream2_client{readers = Readers}, TagMsgs}.
 
 
