@@ -386,8 +386,7 @@ i(durable,     Q) when ?is_amqqueue(Q) -> amqqueue:is_durable(Q);
 i(auto_delete, Q) when ?is_amqqueue(Q) -> amqqueue:is_auto_delete(Q);
 i(arguments,   Q) when ?is_amqqueue(Q) -> amqqueue:get_arguments(Q);
 i(pid, Q) when ?is_amqqueue(Q) ->
-    {Name, _} = amqqueue:get_pid(Q),
-    whereis(Name);
+    amqqueue:get_pid(Q);
 i(messages, Q) when ?is_amqqueue(Q) ->
     QName = amqqueue:get_name(Q),
     case ets:lookup(queue_coarse_metrics, QName) of
@@ -436,9 +435,9 @@ i(consumers, Q) when ?is_amqqueue(Q) ->
             0
     end;
 i(memory, Q) when ?is_amqqueue(Q) ->
-    {Name, _} = amqqueue:get_pid(Q),
+    Pid = amqqueue:get_pid(Q),
     try
-        {memory, M} = process_info(whereis(Name), memory),
+        {memory, M} = process_info(Pid, memory),
         M
     catch
         error:badarg ->
@@ -458,9 +457,9 @@ i(memory, Q) when ?is_amqqueue(Q) ->
 %         _ -> not_member
 %     end;
 i(garbage_collection, Q) when ?is_amqqueue(Q) ->
-    {Name, _} = amqqueue:get_pid(Q),
+    Pid = amqqueue:get_pid(Q),
     try
-        rabbit_misc:get_gc_info(whereis(Name))
+        rabbit_misc:get_gc_info(Pid)
     catch
         error:badarg ->
             []
@@ -470,44 +469,18 @@ i(members, Q) when ?is_amqqueue(Q) ->
 i(online, Q) ->
     get_nodes(Q);
 i(leader, Q) ->
-    {_Name, Leader} = amqqueue:get_pid(Q),
-    Leader;
-i(open_files, Q) when ?is_amqqueue(Q) ->
-    {Name, _} = amqqueue:get_pid(Q),
-    Nodes = get_nodes(Q),
-    {Data, _} = rpc:multicall(Nodes, ?MODULE, open_files, [Name]),
-    lists:flatten(Data);
-i(single_active_consumer_pid, Q) when ?is_amqqueue(Q) ->
-    QPid = amqqueue:get_pid(Q),
-    {ok, {_, SacResult}, _} = ra:local_query(QPid,
-                                             fun rabbit_fifo:query_single_active_consumer/1),
-    case SacResult of
-        {value, {_ConsumerTag, ChPid}} ->
-            ChPid;
-        _ ->
-            ''
-    end;
-i(single_active_consumer_ctag, Q) when ?is_amqqueue(Q) ->
-    QPid = amqqueue:get_pid(Q),
-    {ok, {_, SacResult}, _} = ra:local_query(QPid,
-                                             fun rabbit_fifo:query_single_active_consumer/1),
-    case SacResult of
-        {value, {ConsumerTag, _ChPid}} ->
-            ConsumerTag;
-        _ ->
-            ''
-    end;
-i(type, _) -> quorum;
+    Pid = amqqueue:get_pid(Q),
+    node(Pid);
+% i(open_files, Q) when ?is_amqqueue(Q) ->
+%     Pid = amqqueue:get_pid(Q),
+%     Nodes = get_nodes(Q),
+%     {Data, _} = rpc:multicall(Nodes, ?MODULE, open_files, [Name]),
+%     lists:flatten(Data);
+i(type, _) -> ?MODULE;
 i(messages_ram, Q) when ?is_amqqueue(Q) ->
-    QPid = amqqueue:get_pid(Q),
-    {ok, {_, {Length, _}}, _} = ra:local_query(QPid,
-                                          fun rabbit_fifo:query_in_memory_usage/1),
-    Length;
+    0;
 i(message_bytes_ram, Q) when ?is_amqqueue(Q) ->
-    QPid = amqqueue:get_pid(Q),
-    {ok, {_, {_, Bytes}}, _} = ra:local_query(QPid,
-                                         fun rabbit_fifo:query_in_memory_usage/1),
-    Bytes;
+    0;
 i(_K, _Q) -> ''.
 
 get_nodes(Q) when ?is_amqqueue(Q) ->
