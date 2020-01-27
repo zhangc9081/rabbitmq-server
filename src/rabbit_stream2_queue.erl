@@ -70,7 +70,7 @@ stream_entries(Name, Id, Str) ->
 
 stream_entries(Name, LeaderPid,
                #stream{credit = Credit,
-                       start_offset = _StartOffs,
+                       start_offset = StartOffs,
                        listening_offset = LOffs,
                        log = Seg0} = Str0, MsgIn)
   when Credit > 0 ->
@@ -90,11 +90,13 @@ stream_entries(Name, LeaderPid,
                     {Str0#stream{log = Seg}, MsgIn}
             end;
         {Records, Seg} ->
-            % Msgs = [begin
-            %             R
-            %         end || {O, _} = R <- Records,
-            %                O >= StartOffs],
-            Msgs = Records,
+            Msgs = [begin
+                        Msg0 = binary_to_term(B),
+                        Msg = rabbit_basic:add_header(<<"x-stream-offset">>,
+                                                      long, O, Msg0),
+                        {Name, LeaderPid, O, false, Msg}
+                    end || {O, B} <- Records,
+                           O >= StartOffs],
             % rabbit_log:info("stream2 msgs out ~p", [Msgs]),
             % rabbit_log:info("stream entries got entries", [Entries0]),
             NumMsgs = length(Msgs),
@@ -235,9 +237,7 @@ declare(Q0) ->
     ActingUser = maps:get(user, Opts, ?UNKNOWN_USER),
     Replicas = rabbit_mnesia:cluster_nodes(all) -- [node()],
     N = ra_lib:derive_safe_string(atom_to_list(Name), 8),
-    % rabbit_log:info("Declare stream2 in ~s", [Dir]),
-    Conf = #{dir => Dir,
-             reference => QName,
+    Conf = #{reference => QName,
              name => list_to_atom(N)},
     {ok, LeaderPid, ReplicaPids} = osiris:start_cluster(N, Replicas, Conf),
     Q1 = amqqueue:set_pid(Q0, LeaderPid),

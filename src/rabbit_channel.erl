@@ -2781,19 +2781,18 @@ handle_method(#'exchange.declare'{exchange    = ExchangeNameBin,
 
 handle_stream_deliveries(_ConsumerTag, _QPid, _QName, [], State) ->
     State;
+
 handle_stream_deliveries(ConsumerTag, QPid, QName, MsgBins,
                          #ch{cfg = #conf{writer_pid = WriterPid},
-                             writer_gc_threshold = GCThreshold,
                              unacked_message_q = UAMQ0,
                              next_tag = NextTag0} = State) ->
     % rabbit_log:info("handle stream deliveries ~w ~w", [QName, hd(MsgBins)]),
     DeliveredAt = os:system_time(millisecond),
-    {NextTag, Bins, UAMQ} =
+    {NextTag, UAMQ} =
         lists:foldl(
-          fun ({Offs, Bin}, {DTag, Bins, UAMQ}) ->
-                  #basic_message{exchange_name = ExchangeName,
-                                 routing_keys = [RoutingKey | _CcRoutes],
-                                 content = Content} = binary_to_term(Bin),
+          fun ({_, _, Offs, _, #basic_message{exchange_name = ExchangeName,
+                                              routing_keys = [RoutingKey | _CcRoutes],
+                                              content = Content}}, {DTag, Bins, UAMQ}) ->
                   Deliver = #'basic.deliver'{consumer_tag = ConsumerTag,
                                              delivery_tag = DTag,
                                              redelivered  = false,
@@ -2801,16 +2800,11 @@ handle_stream_deliveries(ConsumerTag, QPid, QName, MsgBins,
                                              routing_key  = RoutingKey},
                   ok = rabbit_writer:send_command(WriterPid, Deliver,
                                                   Content),
-                  {DTag +1, [Bin | Bins],
+                  {DTag +1,
                    ?QUEUE:in({DTag, ConsumerTag, DeliveredAt,
                                        {QPid, QName, Offs}}, UAMQ)}
           end, {NextTag0, [], UAMQ0}, MsgBins),
     % rabbit_log:info("handle stream deliveries next tag ~w", [NextTag]),
-    case GCThreshold of
-        undefined -> ok;
-        _ ->
-            rabbit_basic:maybe_gc_large_msg(Bins, GCThreshold)
-    end,
     ?INCR_STATS(queue_stats, QName, NextTag - NextTag0, deliver, State),
     State#ch{next_tag = NextTag,
              unacked_message_q = UAMQ}.
