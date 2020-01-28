@@ -49,6 +49,7 @@ all_tests() ->
     [
      roundtrip,
      time_travel,
+     idempotent_declare_queue,
      delete_queue
     ].
 
@@ -242,6 +243,30 @@ time_travel(Config) ->
     end,
     ok.
 
+idempotent_declare_queue(Config) ->
+    [Server | _] = rabbit_ct_broker_helpers:get_node_configs(Config, nodename),
+    [MnesiaDir | _] = rabbit_ct_broker_helpers:get_node_configs(Config, mnesia_dir),
+
+    StreamsDir = filename:join(MnesiaDir, "streams"),
+
+    Ch = rabbit_ct_client_helpers:open_channel(Config, Server),
+
+    QName = ?config(queue_name, Config),
+
+    ?assertEqual({'queue.declare_ok', QName, 0, 0},
+                 declare(Ch, QName, [{<<"x-queue-type">>, longstr,
+                                      ?config(queue_type, Config)}])),
+    ?assertEqual({'queue.declare_ok', QName, 0, 0},
+                 declare(Ch, QName, [{<<"x-queue-type">>, longstr,
+                                      ?config(queue_type, Config)}])),
+
+    ?assertEqual([[QName]], lists:sort(rabbit_ct_broker_helpers:rabbitmqctl_list(
+                                      Config, 0, ["list_queues", "name", "--no-table-headers"]))),
+    ?assertMatch({ok, [_]}, file:list_dir(StreamsDir)),
+
+    flush(100),
+    ok.
+
 delete_queue(Config) ->
     [Server | _] = rabbit_ct_broker_helpers:get_node_configs(Config, nodename),
     [MnesiaDir | _] = rabbit_ct_broker_helpers:get_node_configs(Config, mnesia_dir),
@@ -249,20 +274,39 @@ delete_queue(Config) ->
     StreamsDir = filename:join(MnesiaDir, "streams"),
 
     Ch = rabbit_ct_client_helpers:open_channel(Config, Server),
+
     QName = ?config(queue_name, Config),
+    QName2 = ?config(alt_queue_name, Config),
+
+    %% Let's declare two queues
     ?assertEqual({'queue.declare_ok', QName, 0, 0},
                  declare(Ch, QName, [{<<"x-queue-type">>, longstr,
                                       ?config(queue_type, Config)}])),
+    ?assertEqual({'queue.declare_ok', QName2, 0, 0},
+                 declare(Ch, QName2, [{<<"x-queue-type">>, longstr,
+                                      ?config(queue_type, Config)}])),
     publish_many(Ch, QName, 100),
+    publish_many(Ch, QName2, 100),
 
-    ?assertEqual([[QName]], rabbit_ct_broker_helpers:rabbitmqctl_list(
-                              Config, 0, ["list_queues", "name", "--no-table-headers"])),
-    ?assertMatch({ok, [_]}, file:list_dir(StreamsDir)),
+    %% Check the queues are listed and have a data directory
+    Queues = lists:sort([[QName], [QName2]]),
+    ?assertEqual(Queues, lists:sort(rabbit_ct_broker_helpers:rabbitmqctl_list(
+                                      Config, 0, ["list_queues", "name", "--no-table-headers"]))),
+    ?assertMatch({ok, [_, _]}, file:list_dir(StreamsDir)),
 
+    %% Delete one of the queues
     ?assertEqual({'queue.delete_ok', 0},
                  amqp_channel:call(Ch, #'queue.delete'{queue  = QName})),
  
-   ?assertEqual([], rabbit_ct_broker_helpers:rabbitmqctl_list(
+    ?assertEqual([[QName2]], rabbit_ct_broker_helpers:rabbitmqctl_list(
+                               Config, 0, ["list_queues", "name", "--no-table-headers"])),
+    ?assertMatch({ok, [_]}, file:list_dir(StreamsDir)),
+
+    %% Delete the other queue
+    ?assertEqual({'queue.delete_ok', 0},
+                 amqp_channel:call(Ch, #'queue.delete'{queue  = QName2})),
+ 
+    ?assertEqual([], rabbit_ct_broker_helpers:rabbitmqctl_list(
                        Config, 0, ["list_queues", "name", "--no-table-headers"])),
     ?assertMatch({ok, []}, file:list_dir(StreamsDir)),
 

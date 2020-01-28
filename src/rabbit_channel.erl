@@ -2792,7 +2792,7 @@ handle_stream_deliveries(ConsumerTag, QPid, QName, MsgBins,
         lists:foldl(
           fun ({_, _, Offs, _, #basic_message{exchange_name = ExchangeName,
                                               routing_keys = [RoutingKey | _CcRoutes],
-                                              content = Content}}, {DTag, Bins, UAMQ}) ->
+                                              content = Content}}, {DTag, UAMQ}) ->
                   Deliver = #'basic.deliver'{consumer_tag = ConsumerTag,
                                              delivery_tag = DTag,
                                              redelivered  = false,
@@ -2803,7 +2803,7 @@ handle_stream_deliveries(ConsumerTag, QPid, QName, MsgBins,
                   {DTag +1,
                    ?QUEUE:in({DTag, ConsumerTag, DeliveredAt,
                                        {QPid, QName, Offs}}, UAMQ)}
-          end, {NextTag0, [], UAMQ0}, MsgBins),
+          end, {NextTag0, UAMQ0}, MsgBins),
     % rabbit_log:info("handle stream deliveries next tag ~w", [NextTag]),
     ?INCR_STATS(queue_stats, QName, NextTag - NextTag0, deliver, State),
     State#ch{next_tag = NextTag,
