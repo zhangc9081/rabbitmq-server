@@ -20,6 +20,7 @@
          declare/1,
          delete/2,
          infos/1,
+         info/2,
          reductions/1,
 
          %% other

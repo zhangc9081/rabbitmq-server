@@ -41,14 +41,15 @@ groups() ->
     [
      {stream2, [], [
                     {single_node, [], all_tests()},
-                    {clustered, [], all_tests()}
+                    {clustered, [], [cluster_delete_queue] ++ all_tests()}
                    ]}
     ].
 
 all_tests() ->
     [
      roundtrip,
-     time_travel
+     time_travel,
+     delete_queue
     ].
 
 %% -------------------------------------------------------------------
@@ -132,7 +133,7 @@ merge_app_env(Config) ->
       {ra, [{min_wal_roll_over_interval, 30000}]}).
 
 end_per_testcase(Testcase, Config) ->
-    % catch delete_queues(),
+    rabbit_ct_broker_helpers:rpc(Config, 0, ?MODULE, delete_queues, []),
     Config1 = rabbit_ct_helpers:run_steps(
                 Config,
                 rabbit_ct_client_helpers:teardown_steps()),
@@ -241,6 +242,100 @@ time_travel(Config) ->
     end,
     ok.
 
+delete_queue(Config) ->
+    [Server | _] = rabbit_ct_broker_helpers:get_node_configs(Config, nodename),
+    [MnesiaDir | _] = rabbit_ct_broker_helpers:get_node_configs(Config, mnesia_dir),
+
+    StreamsDir = filename:join(MnesiaDir, "streams"),
+
+    Ch = rabbit_ct_client_helpers:open_channel(Config, Server),
+    QName = ?config(queue_name, Config),
+    ?assertEqual({'queue.declare_ok', QName, 0, 0},
+                 declare(Ch, QName, [{<<"x-queue-type">>, longstr,
+                                      ?config(queue_type, Config)}])),
+    publish_many(Ch, QName, 100),
+
+    ?assertEqual([[QName]], rabbit_ct_broker_helpers:rabbitmqctl_list(
+                              Config, 0, ["list_queues", "name", "--no-table-headers"])),
+    ?assertMatch({ok, [_]}, file:list_dir(StreamsDir)),
+
+    ?assertEqual({'queue.delete_ok', 0},
+                 amqp_channel:call(Ch, #'queue.delete'{queue  = QName})),
+ 
+   ?assertEqual([], rabbit_ct_broker_helpers:rabbitmqctl_list(
+                       Config, 0, ["list_queues", "name", "--no-table-headers"])),
+    ?assertMatch({ok, []}, file:list_dir(StreamsDir)),
+
+    flush(100),
+    ok.
+
+cluster_delete_queue(Config) ->
+    [Server1, Server2, Server3] = rabbit_ct_broker_helpers:get_node_configs(Config, nodename),
+    [MnesiaDir1, MnesiaDir2, MnesiaDir3] = rabbit_ct_broker_helpers:get_node_configs(Config, mnesia_dir),
+
+    StreamsDir1 = filename:join(MnesiaDir1, "streams"),
+    StreamsDir2 = filename:join(MnesiaDir2, "streams"),
+    StreamsDir3 = filename:join(MnesiaDir3, "streams"),
+
+    Ch1 = rabbit_ct_client_helpers:open_channel(Config, Server1),
+    Ch2 = rabbit_ct_client_helpers:open_channel(Config, Server2),
+    Ch3 = rabbit_ct_client_helpers:open_channel(Config, Server3),
+
+    QName = ?config(queue_name, Config),
+    Type = ?config(queue_type, Config),
+
+    %% Declare and delete on the same node
+    assert_declare(Ch1, QName, Type),
+    assert_exists(QName, Config, StreamsDir1, StreamsDir2, StreamsDir3),
+
+    ?assertEqual({'queue.delete_ok', 0},
+                 amqp_channel:call(Ch1, #'queue.delete'{queue  = QName})),
+    assert_deleted(Config, StreamsDir1, StreamsDir2, StreamsDir3),
+
+    %% Declare and delete on different nodes
+    assert_declare(Ch1, QName, Type),
+    assert_exists(QName, Config, StreamsDir1, StreamsDir2, StreamsDir3),
+
+    ?assertEqual({'queue.delete_ok', 0},
+                 amqp_channel:call(Ch2, #'queue.delete'{queue  = QName})),
+    assert_deleted(Config, StreamsDir1, StreamsDir2, StreamsDir3),
+
+    %% Try to delete again
+    ?assertEqual({'queue.delete_ok', 0},
+                 amqp_channel:call(Ch2, #'queue.delete'{queue  = QName})),
+    ?assertEqual({'queue.delete_ok', 0},
+                 amqp_channel:call(Ch3, #'queue.delete'{queue  = QName})),
+
+    %% Declare and delete on different nodes
+    assert_declare(Ch3, QName, Type),
+    assert_exists(QName, Config, StreamsDir1, StreamsDir2, StreamsDir3),
+
+    ?assertEqual({'queue.delete_ok', 0},
+                 amqp_channel:call(Ch1, #'queue.delete'{queue  = QName})),
+    assert_deleted(Config, StreamsDir1, StreamsDir2, StreamsDir3),
+
+    flush(100),
+    ok.
+
+assert_declare(Ch, QName, Type) ->
+    ?assertEqual({'queue.declare_ok', QName, 0, 0},
+                 declare(Ch, QName, [{<<"x-queue-type">>, longstr, Type}])),
+    publish_many(Ch, QName, 100).
+
+assert_exists(QName, Config, StreamsDir1, StreamsDir2, StreamsDir3) ->
+    ?assertEqual([[QName]], rabbit_ct_broker_helpers:rabbitmqctl_list(
+                              Config, 0, ["list_queues", "name", "--no-table-headers"])),
+    ?assertMatch({ok, [_]}, file:list_dir(StreamsDir1)),
+    ?assertMatch({ok, [_]}, file:list_dir(StreamsDir2)),
+    ?assertMatch({ok, [_]}, file:list_dir(StreamsDir3)).
+
+assert_deleted(Config, StreamsDir1, StreamsDir2, StreamsDir3) ->
+    ?assertEqual([], rabbit_ct_broker_helpers:rabbitmqctl_list(
+                       Config, 0, ["list_queues", "name", "--no-table-headers"])),
+    ?assertMatch({ok, []}, file:list_dir(StreamsDir1)),
+    ?assertMatch({ok, []}, file:list_dir(StreamsDir2)),
+    ?assertMatch({ok, []}, file:list_dir(StreamsDir3)).
+
 %% HELPERS
 
 publish_confirm(Ch, QName, Msg) ->
@@ -300,3 +395,7 @@ flush(T) ->
     after T ->
               ok
     end.
+
+delete_queues() ->
+    [rabbit_amqqueue:delete(Q, false, false, <<"dummy">>)
+     || Q <- rabbit_amqqueue:list()].
