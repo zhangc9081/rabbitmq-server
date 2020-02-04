@@ -45,7 +45,6 @@ handle_cast(_Request, State) ->
     {noreply, State}.
 
 handle_info(tick, State) ->
-    rabbit_log:info("osiris metrics tick received", []),
     Data = osiris_counters:overview(),
     maps:map(
       fun ({osiris_writer, QName}, #{offset := Offs}) ->
