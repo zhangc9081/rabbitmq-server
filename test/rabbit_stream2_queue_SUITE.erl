@@ -135,7 +135,7 @@ merge_app_env(Config) ->
       {ra, [{min_wal_roll_over_interval, 30000}]}).
 
 end_per_testcase(Testcase, Config) ->
-    %% rabbit_ct_broker_helpers:rpc(Config, 0, ?MODULE, delete_queues, []),
+    rabbit_ct_broker_helpers:rpc(Config, 0, ?MODULE, delete_queues, []),
     Config1 = rabbit_ct_helpers:run_steps(
                 Config,
                 rabbit_ct_client_helpers:teardown_steps()),
