@@ -241,27 +241,33 @@ declare(Q0) ->
     N = ra_lib:derive_safe_string(LName, length(LName)),
     Conf = #{reference => QName,
              name => list_to_atom(N)},
-    {ok, LeaderPid, ReplicaPids} = osiris:start_cluster(N, Replicas, Conf),
-    Q1 = amqqueue:set_pid(Q0, LeaderPid),
-    NewQ1 = amqqueue:set_type_state(Q1, maps:put(replicas, ReplicaPids, Conf)),
-    case rabbit_amqqueue:internal_declare(NewQ1, false) of
-        {created, Q} ->
-            rabbit_event:notify(queue_created,
-                                [{name, QName},
-                                 {durable, true},
-                                 {auto_delete, false},
-                                 {arguments, Arguments},
-                                 {user_who_performed_action,
-                                  ActingUser}]),
-            {new, Q};
-        {error, Error} ->
-            _ = rabbit_amqqueue:internal_delete(QName, ActingUser),
-            rabbit_misc:protocol_error(
-              internal_error,
-              "Cannot declare a queue '~s' on node '~s': ~255p",
-              [rabbit_misc:rs(QName), node(), Error]);
-        {existing, _} = Ex ->
-            Ex
+    case osiris:start_cluster(N, Replicas, Conf) of
+        {ok, LeaderPid, ReplicaPids} ->
+            Q1 = amqqueue:set_pid(Q0, LeaderPid),
+            NewQ1 = amqqueue:set_type_state(Q1, maps:put(replicas, ReplicaPids, Conf)),
+            case rabbit_amqqueue:internal_declare(NewQ1, false) of
+                {created, Q} ->
+                    rabbit_event:notify(queue_created,
+                                        [{name, QName},
+                                         {durable, true},
+                                         {auto_delete, false},
+                                         {arguments, Arguments},
+                                         {user_who_performed_action,
+                                          ActingUser}]),
+                    {new, Q};
+                {error, Error} ->
+                    _ = rabbit_amqqueue:internal_delete(QName, ActingUser),
+                    rabbit_misc:protocol_error(
+                      internal_error,
+                      "Cannot declare a queue '~s' on node '~s': ~255p",
+                      [rabbit_misc:rs(QName), node(), Error]);
+                {existing, _} = Ex ->
+                    Ex
+            end;
+        {error, {already_started, _}} ->
+            rabbit_misc:protocol_error(precondition_failed,
+                                       "safe queue name already in use '~s'",
+                                       [N])
     end.
 
 recover(Q0) ->

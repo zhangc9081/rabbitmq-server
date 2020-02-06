@@ -51,7 +51,8 @@ all_tests() ->
      time_travel,
      idempotent_declare_queue,
      delete_queue,
-     zenflix
+     zenflix,
+     declare_queue
     ].
 
 %% -------------------------------------------------------------------
@@ -395,6 +396,25 @@ zenflix(Config) ->
     publish_stream(Ch4, QName, 101, 200),
 
     consume_stream(<<"ctag8">>, Ch3, QName, 75, 200),
+
+    flush(100),
+    ok.
+
+declare_queue(Config) ->
+    [Server | _] = rabbit_ct_broker_helpers:get_node_configs(Config, nodename),
+
+    Ch = rabbit_ct_client_helpers:open_channel(Config, Server),
+
+    QName = <<"declare_queue">>,
+    SimilarQName = <<"'declare_queue'">>,
+
+    ?assertEqual({'queue.declare_ok', QName, 0, 0},
+                 declare(Ch, QName, [{<<"x-queue-type">>, longstr,
+                                      ?config(queue_type, Config)}])),
+
+    ?assertExit({{shutdown, {connection_closing, {server_initiated_close, 541, _}}}, _},
+                declare(Ch, SimilarQName, [{<<"x-queue-type">>, longstr,
+                                            ?config(queue_type, Config)}])),
 
     flush(100),
     ok.
