@@ -52,7 +52,8 @@ all_tests() ->
      idempotent_declare_queue,
      delete_queue,
      zenflix,
-     declare_queue
+     declare_queue,
+     counters_initialised_to_zero
     ].
 
 %% -------------------------------------------------------------------
@@ -62,7 +63,7 @@ all_tests() ->
 init_per_suite(Config0) ->
     rabbit_ct_helpers:log_environment(),
     Config = rabbit_ct_helpers:merge_app_env(
-               Config0, {rabbit, [{quorum_tick_interval, 1000}]}),
+               Config0, {rabbit, [{stream2_tick_interval, 100}]}),
     rabbit_ct_helpers:run_setup_steps(
       Config,
       [fun rabbit_ct_broker_helpers:enable_dist_proxy_manager/1]).
@@ -415,6 +416,26 @@ declare_queue(Config) ->
     ?assertExit({{shutdown, {connection_closing, {server_initiated_close, 541, _}}}, _},
                 declare(Ch, SimilarQName, [{<<"x-queue-type">>, longstr,
                                             ?config(queue_type, Config)}])),
+
+    flush(100),
+    ok.
+
+counters_initialised_to_zero(Config) ->
+    [Server | _] = rabbit_ct_broker_helpers:get_node_configs(Config, nodename),
+
+    Ch1 = rabbit_ct_client_helpers:open_channel(Config, Server),
+    QName = ?config(queue_name, Config),
+
+    ?assertEqual({'queue.declare_ok', QName, 0, 0},
+                 declare(Ch1, QName, [{<<"x-queue-type">>, longstr,
+                                      ?config(queue_type, Config)}])),
+
+    timer:sleep(500),
+
+    ?assertEqual([[<<"0">>, <<"0">>, <<"0">>]],
+                 rabbit_ct_broker_helpers:rabbitmqctl_list(
+                   Config, 0, ["list_queues", "messages", "messages_ready",
+                               "messages_unacknowledged", "--no-table-headers"])),
 
     flush(100),
     ok.

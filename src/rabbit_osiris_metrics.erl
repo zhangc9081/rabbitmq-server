@@ -23,7 +23,10 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
          code_change/3]).
 
+-define(TICK_TIMEOUT, 5000).
 -define(SERVER, ?MODULE).
+
+-record(state, {timeout :: non_neg_integer()}).
 
 %%----------------------------------------------------------------------------
 %% Starts the raw metrics storage and owns the ETS tables.
@@ -35,8 +38,10 @@ start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
 init([]) ->
-    erlang:send_after(5000, self(), tick),
-    {ok, none}.
+    Timeout = application:get_env(rabbit, stream2_tick_interval,
+                                  ?TICK_TIMEOUT),
+    erlang:send_after(Timeout, self(), tick),
+    {ok, #state{timeout = Timeout}}.
 
 handle_call(_Request, _From, State) ->
     {noreply, State}.
@@ -44,18 +49,22 @@ handle_call(_Request, _From, State) ->
 handle_cast(_Request, State) ->
     {noreply, State}.
 
-handle_info(tick, State) ->
+handle_info(tick, #state{timeout = Timeout} = State) ->
     Data = osiris_counters:overview(),
     maps:map(
       fun ({osiris_writer, QName}, #{offset := Offs}) ->
-                      rabbit_core_metrics:queue_stats(QName, Offs, 0, Offs, 0),
+                      COffs = case Offs of
+                                  -1 -> 0;
+                                  _ -> Offs
+                              end,
+                      rabbit_core_metrics:queue_stats(QName, COffs, 0, COffs, 0),
                       Infos = rabbit_stream2_queue:infos(QName),
                       rabbit_core_metrics:queue_stats(QName, Infos),
                       ok;
           (_, _V) ->
               ok
       end, Data),
-    erlang:send_after(5000, self(), tick),
+    erlang:send_after(Timeout, self(), tick),
     {noreply, State}.
 
 terminate(_Reason, _State) ->
