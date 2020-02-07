@@ -58,7 +58,19 @@ handle_info(tick, #state{timeout = Timeout} = State) ->
                                   _ -> Offs
                               end,
                       rabbit_core_metrics:queue_stats(QName, COffs, 0, COffs, 0),
-                      Infos = rabbit_stream2_queue:infos(QName),
+                      Infos = try
+                                  rabbit_stream2_queue:infos(QName)
+                              catch
+                                  _:_ ->
+                                      %% It's possible that the writer has died but
+                                      %% it's still on the amqqueue record, so the
+                                      %% `erlang:process_info/2` calls will return
+                                      %% `undefined` and crash with a badmatch.
+                                      %% At least for now, skipping the metrics might
+                                      %% be the best option. Otherwise this brings
+                                      %% down `rabbit_sup` and the whole `rabbit` app.
+                                      []
+                              end,
                       rabbit_core_metrics:queue_stats(QName, Infos),
                       ok;
           (_, _V) ->
