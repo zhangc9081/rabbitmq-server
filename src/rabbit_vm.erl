@@ -30,7 +30,7 @@ memory() ->
                        lists:append(All), distinguishers(), [memory]),
 
     [Qs, QsSlave, Qqs, ConnsReader, ConnsWriter, ConnsChannel, ConnsOther,
-     MsgIndexProc, MgmtDbProc, Plugins] =
+     Qsw, Qsr, Qsrr, MsgIndexProc, MgmtDbProc, Plugins] =
         [aggregate(Names, Sums, memory, fun (X) -> X end)
          || Names <- distinguished_interesting_sups()],
 
@@ -64,7 +64,8 @@ memory() ->
 
     OtherProc = Processes
         - ConnsReader - ConnsWriter - ConnsChannel - ConnsOther
-        - Qs - QsSlave - Qqs - MsgIndexProc - Plugins - MgmtDbProc - MetricsProc,
+        - Qs - QsSlave - Qqs - Qsw - Qsr - Qsrr - MsgIndexProc
+        - Plugins - MgmtDbProc - MetricsProc,
 
     [
      %% Connections
@@ -77,6 +78,9 @@ memory() ->
      {queue_procs,          Qs},
      {queue_slave_procs,    QsSlave},
      {quorum_queue_procs,   Qqs},
+     {stream_queue_writer_procs,         Qsw},
+     {stream_queue_replica_procs,        Qsr},
+     {stream_queue_replica_reader_procs, Qsrr},
 
      %% Processes
      {plugins,              Plugins},
@@ -124,7 +128,7 @@ binary() ->
                               end, Acc, Info)
           end, distinguishers(), [{binary, sets:new()}]),
     [Other, Qs, QsSlave, Qqs, ConnsReader, ConnsWriter, ConnsChannel, ConnsOther,
-     MsgIndexProc, MgmtDbProc, Plugins] =
+     Qsw, Qsr, Qsrr, MsgIndexProc, MgmtDbProc, Plugins] =
         [aggregate(Names, [{other, Rest} | Sums], binary, fun sum_binary/1)
          || Names <- [[other] | distinguished_interesting_sups()]],
     [{connection_readers,  ConnsReader},
@@ -134,6 +138,9 @@ binary() ->
      {queue_procs,         Qs},
      {queue_slave_procs,   QsSlave},
      {quorum_queue_procs,  Qqs},
+     {stream_queue_writer_procs,         Qsw},
+     {stream_queue_replica_procs,        Qsr},
+     {stream_queue_replica_reader_procs, Qsrr},
      {plugins,             Plugins},
      {mgmt_db,             MgmtDbProc},
      {msg_index,           MsgIndexProc},
@@ -177,7 +184,8 @@ bytes(Words) ->  try
                  end.
 
 interesting_sups() ->
-    [queue_sups(), quorum_sups(), conn_sups() | interesting_sups0()].
+    [queue_sups(), quorum_sups(), stream_writer_sups(), stream_replica_sups(),
+     stream_replica_reader_sups(), conn_sups() | interesting_sups0()].
 
 queue_sups() ->
     all_vhosts_children(rabbit_amqqueue_sup_sup).
@@ -192,6 +200,15 @@ quorum_sups() ->
             [Pid || {_, Pid, _, _} <-
                     supervisor:which_children(ra_server_sup_sup)]
     end.
+
+stream_writer_sups() ->
+    [osiris_writer_sup].
+
+stream_replica_sups() ->
+    [osiris_replica_sup].
+
+stream_replica_reader_sups() ->
+    [osiris_replica_reader_sup].
 
 msg_stores() ->
     all_vhosts_children(msg_store_transient)
@@ -248,7 +265,11 @@ distinguished_interesting_sups() ->
      with(conn_sups(), reader),
      with(conn_sups(), writer),
      with(conn_sups(), channel),
-     with(conn_sups(), other)]
+     with(conn_sups(), other),
+     stream_writer_sups(),
+     stream_replica_sups(),
+     stream_replica_reader_sups()
+    ]
         ++ interesting_sups0().
 
 plugin_sups() ->
