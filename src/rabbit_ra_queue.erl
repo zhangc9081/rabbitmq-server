@@ -13,6 +13,8 @@
 recover(Queues) ->
     [begin
          {Name, _} = amqqueue:get_pid(Q0),
+         #{nodes := Nodes} = amqqueue:get_type_state(Q0),
+         Members = [{Name, N} || N <- Nodes],
          case ra:restart_server({Name, node()}) of
              ok ->
                  % queue was restarted, good
@@ -25,7 +27,7 @@ recover(Queues) ->
                  TickTimeout = application:get_env(rabbit, quorum_tick_interval,
                                                    5000),
                  Type = amqqueue:get_type(Q0),
-                 Conf = Type:make_ra_conf(Q0, {Name, node()}, TickTimeout),
+                 Conf = Type:make_ra_conf(Q0, {Name, node()}, Members, TickTimeout),
                  case ra:start_server(Conf) of
                      ok ->
                          ok;

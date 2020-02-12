@@ -864,9 +864,8 @@ handle_info({osiris_written, QName, Corrs},
         #{QName := QState0} when ?IS_STREAM2(QState0) ->
             {MsgSeqNos, QState} = rabbit_stream2_queue:handle_written(
                                     QState0, Corrs),
-
             State = State0#ch{queue_states = QueueStates0#{QName => QState}},
-            noreply_coalesce(confirm(MsgSeqNos, QName, State));
+            noreply_coalesce(confirm(MsgSeqNos, rabbit_stream2_queue:leader(QState), State));
         _ ->
             noreply(State0)
     end;
@@ -2091,7 +2090,7 @@ reject(DeliveryTag, Requeue, Multiple,
 internal_reject(Requeue, Acked, Limiter,
                 State = #ch{queue_states = QueueStates0}) ->
     QueueStates = foreach_per_queue(
-                    fun({QPid, CTag}, MsgIds, Acc0) ->
+                    fun({QPid, _, CTag}, MsgIds, Acc0) ->
                             rabbit_amqqueue:reject(QPid, Requeue, {CTag, MsgIds},
                                                    self(), Acc0)
                     end, Acked, QueueStates0),
@@ -2162,13 +2161,18 @@ ack(Acked, State) ->
     foreach_per_queue(
       fun ({QPid, QName, CTag}, MsgIds,
            #ch{queue_states = QS0} = Acc) ->
-              {QS, {_, _, OffsetMsgs}} = rabbit_amqqueue:ack(QPid,
-                                                             {CTag, QName, MsgIds},
-                                                             self(), QS0),
-              incr_queue_stats(QName, MsgIds, State),
-              handle_stream_deliveries(CTag, QPid,
-                                       QName, OffsetMsgs,
-                                       Acc#ch{queue_states = QS})
+              case rabbit_amqqueue:ack(QPid,
+                                       {CTag, QName, MsgIds},
+                                       self(), QS0) of
+                  {QS, {_, _, OffsetMsgs}} ->
+                      incr_queue_stats(QName, MsgIds, State),
+                      handle_stream_deliveries(CTag, QPid,
+                                               QName, OffsetMsgs,
+                                               Acc#ch{queue_states = QS});
+                  {QS, []} ->
+                      incr_queue_stats(QName, MsgIds, State),
+                      Acc#ch{queue_states = QS}
+              end
       end, Acked, State).
         % lists:foldl(
         %   fun({Tag, LeaderPid, OffsetMsgs}, Acc) ->
@@ -2264,7 +2268,7 @@ deliver_to_queues({Delivery = #delivery{message    = Message = #basic_message{
     Qs = rabbit_amqqueue:lookup(DelQNames),
     {DeliveredQPids, DeliveredQQPids, QueueStates} =
         rabbit_amqqueue:deliver(Qs, Delivery, QueueStates0),
-    AllDeliveredQRefs = DeliveredQPids ++ [N || {N, _} <- DeliveredQQPids],
+    AllDeliveredQRefs = DeliveredQPids ++ DeliveredQQPids,
     %% The maybe_monitor_all/2 monitors all queues to which we
     %% delivered. But we want to monitor even queues we didn't deliver
     %% to, since we need their 'DOWN' messages to clean

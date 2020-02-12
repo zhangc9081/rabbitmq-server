@@ -15,6 +15,7 @@
          init_client/1,
          queue_name/1,
          pending_size/1,
+         leader/1,
 
          %% mgmt
          declare/1,
@@ -138,6 +139,9 @@ init_client(Q) when ?is_amqqueue(Q) ->
 
 queue_name(#stream2_client{name = Name}) ->
     Name.
+
+leader(#stream2_client{leader = Leader}) ->
+    Leader.
 
 pending_size(#stream2_client{correlation = Correlation}) ->
     maps:size(Correlation).
@@ -357,7 +361,8 @@ filter_alive(Pids) ->
 delete(Q, ActingUser) when ?amqqueue_is_stream2(Q) ->
     Conf = amqqueue:get_type_state(Q),
     Name = maps:get(name, Conf),
-    osiris:delete_cluster(Name, amqqueue:get_pid(Q), maps:get(replicas, Conf)),
+    osiris:delete_cluster(Name, node(amqqueue:get_pid(Q)),
+                          [node(R) || R <- maps:get(replicas, Conf)], Conf),
     delete_queue_data(amqqueue:get_name(Q), ActingUser),
     %% TODO return number of ready messages
     {ok, 0}.

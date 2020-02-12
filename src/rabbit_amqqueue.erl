@@ -1600,7 +1600,7 @@ ack(QPid, {CTag, QName, MsgIds}, ChPid, QueueStates) when ?IS_CLASSIC(QPid) ->
                                              [{ack, MsgIds, ChPid}]}),
             {QueueStates, []}
     end;
-ack({Name, _} = QPid, {CTag, MsgIds}, _ChPid, QuorumStates)
+ack({Name, _} = QPid, {CTag, _QName, MsgIds}, _ChPid, QuorumStates)
   when ?IS_QUORUM(QPid) ->
     case QuorumStates of
         #{Name := QState0}
@@ -1804,10 +1804,10 @@ basic_consume(Q,
               ConsumerTag, ExclusiveConsume, Args, OkMsg,
               ActingUser, QStates)
   when ?amqqueue_is_quorum(Q) ->
-    {Name, _} = Id = amqqueue:get_pid(Q),
+    {Name, _} = amqqueue:get_pid(Q),
     QName = amqqueue:get_name(Q),
     ok = check_consume_arguments(QName, Args),
-    QState0 = get_queue_client_state(Id, QName, QStates),
+    QState0 = get_queue_client_state(Q, QName, QStates),
     case rabbit_quorum_queue:basic_consume(Q, NoAck, ChPid,
                                            ConsumerPrefetchCount,
                                            ConsumerTag,

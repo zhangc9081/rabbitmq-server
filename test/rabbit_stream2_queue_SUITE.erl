@@ -41,7 +41,9 @@ groups() ->
     [
      {stream2, [], [
                     {single_node, [], all_tests()},
-                    {clustered, [], [cluster_delete_queue] ++ all_tests()}
+                    {clustered, [], [cluster_delete_queue,
+                                     publish_confirm_with_replica_down]
+                     ++ all_tests()}
                    ]}
     ].
 
@@ -437,6 +439,31 @@ counters_initialised_to_zero(Config) ->
                    Config, 0, ["list_queues", "messages", "messages_ready",
                                "messages_unacknowledged", "--no-table-headers"])),
 
+    flush(100),
+    ok.
+
+publish_confirm_with_replica_down(Config) ->
+    [Server1, Server2, _] = rabbit_ct_broker_helpers:get_node_configs(Config, nodename),
+
+    Ch = rabbit_ct_client_helpers:open_channel(Config, Server1),
+    QName = ?config(queue_name, Config),
+    ?assertEqual({'queue.declare_ok', QName, 0, 0},
+                 declare(Ch, QName, [{<<"x-queue-type">>, longstr,
+                                      ?config(queue_type, Config)}])),
+
+    rabbit_ct_broker_helpers:stop_node(Config, Server2),
+
+    #'confirm.select_ok'{} = amqp_channel:call(Ch, #'confirm.select'{}),
+    publish(Ch, QName, <<"msg1">>),
+
+    amqp_channel:register_confirm_handler(Ch, self()),
+    ok = receive
+             #'basic.nack'{} -> ok
+         after 2500 ->
+                 exit(confirm_timeout)
+         end,
+
+    rabbit_ct_broker_helpers:start_node(Config, Server2),
     flush(100),
     ok.
 
