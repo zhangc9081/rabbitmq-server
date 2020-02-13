@@ -15,7 +15,6 @@
          init_client/1,
          queue_name/1,
          pending_size/1,
-         leader/1,
 
          %% mgmt
          declare/1,
@@ -139,9 +138,6 @@ init_client(Q) when ?is_amqqueue(Q) ->
 
 queue_name(#stream2_client{name = Name}) ->
     Name.
-
-leader(#stream2_client{leader = Leader}) ->
-    Leader.
 
 pending_size(#stream2_client{correlation = Correlation}) ->
     maps:size(Correlation).

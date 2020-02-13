@@ -865,7 +865,7 @@ handle_info({osiris_written, QName, Corrs},
             {MsgSeqNos, QState} = rabbit_stream2_queue:handle_written(
                                     QState0, Corrs),
             State = State0#ch{queue_states = QueueStates0#{QName => QState}},
-            noreply_coalesce(confirm(MsgSeqNos, rabbit_stream2_queue:leader(QState), State));
+            noreply_coalesce(confirm(MsgSeqNos, QName, State));
         _ ->
             noreply(State0)
     end;
@@ -2304,8 +2304,12 @@ deliver_to_queues({Delivery = #delivery{message    = Message = #basic_message{
                                    Message, State1),
     AllDeliveredQNames = [ QName || QRef        <- AllDeliveredQRefs,
                                     {ok, QName} <- [maps:find(QRef, QNames1)]],
+    %% classic queue confirms return a Pid, any other returns the queue name
+    AllDeliveredQConfirmRefs = DeliveredQPids ++
+        [ QName || QRef        <- DeliveredQQPids,
+                   {ok, QName} <- [maps:find(QRef, QNames1)]],
     State2 = process_routing_confirm(Confirm,
-                                     AllDeliveredQRefs,
+                                     AllDeliveredQConfirmRefs,
                                      AllDeliveredQNames,
                                      MsgSeqNo,
                                      XName, State1),
@@ -2346,7 +2350,14 @@ confirm(MsgSeqNos, QRef, State = #ch{queue_names = QNames, unconfirmed = UC}) ->
     %% NOTE: if queue name does not exist here it's likely that the ref also
     %% does not exist in unconfirmed messages.
     %% Neither does the 'ignore' atom, so it's a reasonable fallback.
-    QName = maps:get(QRef, QNames, ignore),
+    QName = case is_pid(QRef) of
+                true ->
+                    %% for classic queues
+                    maps:get(QRef, QNames, ignore);
+                _ ->
+                    %% for any other type of queue
+                    QRef
+            end,
     {ConfirmMXs, RejectMXs, UC1} =
         unconfirmed_messages:confirm_multiple_msg_ref(MsgSeqNos, QName, QRef, UC),
     %% NB: don't call noreply/1 since we don't want to send confirms.

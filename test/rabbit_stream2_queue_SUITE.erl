@@ -458,9 +458,10 @@ publish_confirm_with_replica_down(Config) ->
 
     amqp_channel:register_confirm_handler(Ch, self()),
     ok = receive
-             #'basic.nack'{} -> ok
-         after 2500 ->
-                 exit(confirm_timeout)
+             #'basic.nack'{} -> exit(unconfirmed);
+             #'basic.ack'{} -> exit(confirmed)
+         after 1000 ->
+                 ok
          end,
 
     rabbit_ct_broker_helpers:start_node(Config, Server2),
