@@ -415,7 +415,7 @@ declare_queue(Config) ->
                  declare(Ch, QName, [{<<"x-queue-type">>, longstr,
                                       ?config(queue_type, Config)}])),
 
-    ?assertExit({{shutdown, {connection_closing, {server_initiated_close, 541, _}}}, _},
+    ?assertExit({{shutdown, {server_initiated_close, 406, _}}, _},
                 declare(Ch, SimilarQName, [{<<"x-queue-type">>, longstr,
                                             ?config(queue_type, Config)}])),
 
