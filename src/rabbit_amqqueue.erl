@@ -748,7 +748,8 @@ declare_args() ->
      {<<"x-queue-mode">>,              fun check_queue_mode/2},
      {<<"x-single-active-consumer">>,  fun check_single_active_consumer_arg/2},
      {<<"x-queue-type">>,              fun check_queue_type/2},
-     {<<"x-quorum-initial-group-size">>,     fun check_default_quorum_initial_group_size_arg/2}].
+     {<<"x-quorum-initial-group-size">>,     fun check_default_quorum_initial_group_size_arg/2},
+     {<<"x-max-age">>,                 fun check_max_age_arg/2}].
 
 consume_args() -> [{<<"x-priority">>,              fun check_int_arg/2},
                    {<<"x-cancel-on-ha-failover">>, fun check_bool_arg/2}].
@@ -802,6 +803,26 @@ check_default_quorum_initial_group_size_arg({Type, Val}, Args) ->
         Error            -> Error
     end.
 
+check_max_age_arg({longstr, Val}, _Args) ->
+    case re:run(Val, "(^[0-9]*)(.*)", [{capture, all_but_first, list}]) of
+        {match, [Int, Unit]} ->
+            case list_to_integer(Int) of
+                I when I > 0 ->
+                    case lists:member(Unit, ["Y", "M", "D", "h", "m", "s"]) of
+                        true ->
+                            ok;
+                        false ->
+                            {error, invalid_max_age}
+                    end;
+                _ ->
+                    {error, invalid_max_age}
+            end;
+        _ ->
+            {error, invalid_max_age}
+    end;
+check_max_age_arg({Type,    _}, _Args) ->
+    {error, {unacceptable_type, Type}}.
+
 %% Note that the validity of x-dead-letter-exchange is already verified
 %% by rabbit_channel's queue.declare handler.
 check_dlxname_arg({longstr, _}, _) -> ok;
@@ -834,7 +855,7 @@ check_queue_mode({Type,    _}, _Args) ->
     {error, {unacceptable_type, Type}}.
 
 check_queue_type({longstr, Val}, _Args) ->
-    case lists:member(Val, [<<"classic">>, <<"quorum">>]) of
+    case lists:member(Val, [<<"classic">>, <<"quorum">>, <<"stream">>]) of
         true  -> ok;
         false -> {error, invalid_queue_type}
     end;

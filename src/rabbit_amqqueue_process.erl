@@ -434,18 +434,8 @@ process_args_policy(State = #q{q                   = Q,
          {<<"queue-mode">>,              fun res_arg/2, fun init_queue_mode/2}],
       drop_expired_msgs(
          lists:foldl(fun({Name, Resolve, Fun}, StateN) ->
-                             Fun(args_policy_lookup(Name, Resolve, Q), StateN)
+                             Fun(rabbit_queue_type_util:args_policy_lookup(Name, Resolve, Q), StateN)
                      end, State#q{args_policy_version = N + 1}, ArgsTable)).
-
-args_policy_lookup(Name, Resolve, Q) ->
-    Args = amqqueue:get_arguments(Q),
-    AName = <<"x-", Name/binary>>,
-    case {rabbit_policy:get(Name, Q), rabbit_misc:table_lookup(Args, AName)} of
-        {undefined, undefined}       -> undefined;
-        {undefined, {_Type, Val}}    -> Val;
-        {Val,       undefined}       -> Val;
-        {PolVal,    {_Type, ArgVal}} -> Resolve(PolVal, ArgVal)
-    end.
 
 res_arg(_PolVal, ArgVal) -> ArgVal.
 res_min(PolVal, ArgVal)  -> erlang:min(PolVal, ArgVal).

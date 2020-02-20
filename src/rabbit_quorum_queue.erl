@@ -55,6 +55,9 @@
 -export([is_enabled/0,
          declare/2]).
 
+-import(rabbit_queue_type_util, [args_policy_lookup/3,
+                                 qname_to_internal_name/1]).
+
 -include_lib("stdlib/include/qlc.hrl").
 -include("rabbit.hrl").
 -include("amqqueue.hrl").
@@ -131,11 +134,11 @@ declare(Q, _Node) when ?amqqueue_is_quorum(Q) ->
     Opts = amqqueue:get_options(Q),
     ActingUser = maps:get(user, Opts, ?UNKNOWN_USER),
     check_invalid_arguments(QName, Arguments),
-    check_auto_delete(Q),
-    check_exclusive(Q),
-    check_non_durable(Q),
+    rabbit_queue_type_util:check_auto_delete(Q),
+    rabbit_queue_type_util:check_exclusive(Q),
+    rabbit_queue_type_util:check_non_durable(Q),
     QuorumSize = get_default_quorum_initial_group_size(Arguments),
-    RaName = qname_to_rname(QName),
+    RaName = qname_to_internal_name(QName),
     Id = {RaName, node()},
     Nodes = select_quorum_nodes(QuorumSize, rabbit_mnesia:cluster_nodes(all)),
     NewQ0 = amqqueue:set_pid(Q, Id),
@@ -778,7 +781,7 @@ cluster_state(Name) ->
 status(Vhost, QueueName) ->
     %% Handle not found queues
     QName = #resource{virtual_host = Vhost, name = QueueName, kind = queue},
-    RName = qname_to_rname(QName),
+    RName = qname_to_internal_name(QName),
     case rabbit_amqqueue:lookup(QName) of
         {ok, Q} when ?amqqueue_is_classic(Q) ->
             {error, classic_queue_not_supported};
@@ -1052,16 +1055,6 @@ init_dlx(DLX, Q) when ?is_amqqueue(Q) ->
 
 res_arg(_PolVal, ArgVal) -> ArgVal.
 
-args_policy_lookup(Name, Resolve, Q) when ?is_amqqueue(Q) ->
-    Args = amqqueue:get_arguments(Q),
-    AName = <<"x-", Name/binary>>,
-    case {rabbit_policy:get(Name, Q), rabbit_misc:table_lookup(Args, AName)} of
-        {undefined, undefined}       -> undefined;
-        {undefined, {_Type, Val}}    -> Val;
-        {Val,       undefined}       -> Val;
-        {PolVal,    {_Type, ArgVal}} -> Resolve(PolVal, ArgVal)
-    end.
-
 dead_letter_publish(undefined, _, _, _) ->
     ok;
 dead_letter_publish(X, RK, QName, ReasonMsgs) ->
@@ -1072,12 +1065,6 @@ dead_letter_publish(X, RK, QName, ReasonMsgs) ->
         {error, not_found} ->
             ok
     end.
-
-%% TODO escape hack
-qname_to_rname(#resource{virtual_host = <<"/">>, name = Name}) ->
-    erlang:binary_to_atom(<<"%2F_", Name/binary>>, utf8);
-qname_to_rname(#resource{virtual_host = VHost, name = Name}) ->
-    erlang:binary_to_atom(<<VHost/binary, "_", Name/binary>>, utf8).
 
 find_quorum_queues(VHost) ->
     Node = node(),
@@ -1289,41 +1276,7 @@ maybe_send_reply(ChPid, Msg) -> ok = rabbit_channel:send_command(ChPid, Msg).
 check_invalid_arguments(QueueName, Args) ->
     Keys = [<<"x-expires">>, <<"x-message-ttl">>,
             <<"x-max-priority">>, <<"x-queue-mode">>, <<"x-overflow">>],
-    [case rabbit_misc:table_lookup(Args, Key) of
-         undefined -> ok;
-         _TypeVal   -> rabbit_misc:protocol_error(
-                         precondition_failed,
-                         "invalid arg '~s' for ~s",
-                         [Key, rabbit_misc:rs(QueueName)])
-     end || Key <- Keys],
-    ok.
-
-check_auto_delete(Q) when ?amqqueue_is_auto_delete(Q) ->
-    Name = amqqueue:get_name(Q),
-    rabbit_misc:protocol_error(
-      precondition_failed,
-      "invalid property 'auto-delete' for ~s",
-      [rabbit_misc:rs(Name)]);
-check_auto_delete(_) ->
-    ok.
-
-check_exclusive(Q) when ?amqqueue_exclusive_owner_is(Q, none) ->
-    ok;
-check_exclusive(Q) when ?is_amqqueue(Q) ->
-    Name = amqqueue:get_name(Q),
-    rabbit_misc:protocol_error(
-      precondition_failed,
-      "invalid property 'exclusive-owner' for ~s",
-      [rabbit_misc:rs(Name)]).
-
-check_non_durable(Q) when ?amqqueue_is_durable(Q) ->
-    ok;
-check_non_durable(Q) when not ?amqqueue_is_durable(Q) ->
-    Name = amqqueue:get_name(Q),
-    rabbit_misc:protocol_error(
-      precondition_failed,
-      "invalid property 'non-durable' for ~s",
-      [rabbit_misc:rs(Name)]).
+    rabbit_queue_type_util:check_invalid_arguments(QueueName, Args, Keys).
 
 queue_name(RaFifoState) ->
     rabbit_fifo_client:cluster_name(RaFifoState).

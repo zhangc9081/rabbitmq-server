@@ -184,11 +184,16 @@
 -callback info(amqqueue:amqqueue(), all_keys | rabbit_types:info_keys()) ->
     rabbit_types:infos().
 
+-callback stat(amqqueue:amqqueue()) ->
+    {'ok', non_neg_integer(), non_neg_integer()}.
+
 %% TODO: this should be controlled by a registry that is populated on boot
 discover(<<"quorum">>) ->
     rabbit_quorum_queue;
 discover(<<"classic">>) ->
-    rabbit_classic_queue.
+    rabbit_classic_queue;
+discover(<<"stream">>) ->
+    rabbit_stream_queue.
 
 default() ->
     rabbit_classic_queue.
