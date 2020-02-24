@@ -94,8 +94,11 @@ declare(Q0, Node) when ?amqqueue_is_stream(Q0) ->
              boolean(), rabbit_types:username()) ->
     rabbit_types:ok(non_neg_integer()) |
     rabbit_types:error(in_use | not_empty).
-delete(_Q, _IfUnused, _IfEmpty, _ActingUser) ->
-    ok.
+delete(Q, _IfUnused, _IfEmpty, ActingUser) ->
+    osiris:delete_cluster(amqqueue:get_type_state(Q)),
+    _ = rabbit_amqqueue:internal_delete(amqqueue:get_name(Q), ActingUser),
+    %% TODO return number of ready messages
+    {ok, 0}.
 
 -spec purge(amqqueue:amqqueue()) ->
     {'ok', non_neg_integer()}.

@@ -47,7 +47,8 @@ all_tests() ->
      declare_max_age,
      declare_invalid_args,
      declare_invalid_properties,
-     start_queue
+     declare_queue,
+     delete_queue
     ].
 
 %% -------------------------------------------------------------------
@@ -121,7 +122,6 @@ end_per_group(_, Config) ->
 
 init_per_testcase(Testcase, Config) ->
     Config1 = rabbit_ct_helpers:testcase_started(Config, Testcase),
-    rabbit_ct_broker_helpers:rpc(Config, 0, ?MODULE, delete_queues, []),
     Q = rabbit_data_coercion:to_binary(Testcase),
     Config2 = rabbit_ct_helpers:set_config(Config1,
                                            [{queue_name, Q},
@@ -134,7 +134,7 @@ merge_app_env(Config) ->
                                       {rabbit, [{core_metrics_gc_interval, 100}]}).
 
 end_per_testcase(Testcase, Config) ->
-    catch delete_queues(),
+    rabbit_ct_broker_helpers:rpc(Config, 0, ?MODULE, delete_queues, []),
     Config1 = rabbit_ct_helpers:run_steps(
                 Config,
                 rabbit_ct_client_helpers:teardown_steps()),
@@ -173,13 +173,13 @@ declare_max_age(Config) ->
 
 declare_invalid_properties(Config) ->
     Server = rabbit_ct_broker_helpers:get_node_config(Config, 0, nodename),
-    LQ = ?config(queue_name, Config),
+    Q = ?config(queue_name, Config),
 
     ?assertExit(
        {{shutdown, {server_initiated_close, 406, _}}, _},
        amqp_channel:call(
          rabbit_ct_client_helpers:open_channel(Config, Server),
-         #'queue.declare'{queue     = LQ,
+         #'queue.declare'{queue     = Q,
                           auto_delete = true,
                           durable   = true,
                           arguments = [{<<"x-queue-type">>, longstr, <<"stream">>}]})),
@@ -187,7 +187,7 @@ declare_invalid_properties(Config) ->
        {{shutdown, {server_initiated_close, 406, _}}, _},
        amqp_channel:call(
          rabbit_ct_client_helpers:open_channel(Config, Server),
-         #'queue.declare'{queue     = LQ,
+         #'queue.declare'{queue     = Q,
                           exclusive = true,
                           durable   = true,
                           arguments = [{<<"x-queue-type">>, longstr, <<"stream">>}]})),
@@ -195,64 +195,79 @@ declare_invalid_properties(Config) ->
        {{shutdown, {server_initiated_close, 406, _}}, _},
        amqp_channel:call(
          rabbit_ct_client_helpers:open_channel(Config, Server),
-         #'queue.declare'{queue     = LQ,
+         #'queue.declare'{queue     = Q,
                           durable   = false,
                           arguments = [{<<"x-queue-type">>, longstr, <<"stream">>}]})).
 
 declare_invalid_args(Config) ->
     Server = rabbit_ct_broker_helpers:get_node_config(Config, 0, nodename),
-    LQ = ?config(queue_name, Config),
+    Q = ?config(queue_name, Config),
 
     ?assertExit(
        {{shutdown, {server_initiated_close, 406, _}}, _},
        declare(rabbit_ct_client_helpers:open_channel(Config, Server),
-               LQ, [{<<"x-queue-type">>, longstr, <<"stream">>},
+               Q, [{<<"x-queue-type">>, longstr, <<"stream">>},
                     {<<"x-expires">>, long, 2000}])),
     ?assertExit(
        {{shutdown, {server_initiated_close, 406, _}}, _},
        declare(rabbit_ct_client_helpers:open_channel(Config, Server),
-               LQ, [{<<"x-queue-type">>, longstr, <<"stream">>},
+               Q, [{<<"x-queue-type">>, longstr, <<"stream">>},
                     {<<"x-message-ttl">>, long, 2000}])),
 
     ?assertExit(
        {{shutdown, {server_initiated_close, 406, _}}, _},
        declare(rabbit_ct_client_helpers:open_channel(Config, Server),
-               LQ, [{<<"x-queue-type">>, longstr, <<"stream">>},
+               Q, [{<<"x-queue-type">>, longstr, <<"stream">>},
                     {<<"x-max-priority">>, long, 2000}])),
 
     [?assertExit(
         {{shutdown, {server_initiated_close, 406, _}}, _},
         declare(rabbit_ct_client_helpers:open_channel(Config, Server),
-                LQ, [{<<"x-queue-type">>, longstr, <<"stream">>},
+                Q, [{<<"x-queue-type">>, longstr, <<"stream">>},
                      {<<"x-overflow">>, longstr, XOverflow}]))
      || XOverflow <- [<<"reject-publish">>, <<"reject-publish-dlx">>]],
 
     ?assertExit(
        {{shutdown, {server_initiated_close, 406, _}}, _},
        declare(rabbit_ct_client_helpers:open_channel(Config, Server),
-               LQ, [{<<"x-queue-type">>, longstr, <<"stream">>},
+               Q, [{<<"x-queue-type">>, longstr, <<"stream">>},
                     {<<"x-queue-mode">>, longstr, <<"lazy">>}])),
 
     ?assertExit(
        {{shutdown, {server_initiated_close, 406, _}}, _},
        declare(rabbit_ct_client_helpers:open_channel(Config, Server),
-               LQ, [{<<"x-queue-type">>, longstr, <<"stream">>},
+               Q, [{<<"x-queue-type">>, longstr, <<"stream">>},
                     {<<"x-quorum-initial-group-size">>, longstr, <<"hop">>}])).
 
-start_queue(Config) ->
-    Server = rabbit_ct_broker_helpers:get_node_config(Config, 0, nodename),
+declare_queue(Config) ->
+    [Server | _] = rabbit_ct_broker_helpers:get_node_configs(Config, nodename),
 
     Ch = rabbit_ct_client_helpers:open_channel(Config, Server),
-    LQ = ?config(queue_name, Config),
-    ?assertEqual({'queue.declare_ok', LQ, 0, 0},
-                 declare(Ch, LQ, [{<<"x-queue-type">>, longstr, <<"stream">>}])),
+    Q = ?config(queue_name, Config),
+    ?assertEqual({'queue.declare_ok', Q, 0, 0},
+                 declare(Ch, Q, [{<<"x-queue-type">>, longstr, <<"stream">>}])),
 
     %% Test declare an existing queue
-    ?assertEqual({'queue.declare_ok', LQ, 0, 0},
-                 declare(Ch, LQ, [{<<"x-queue-type">>, longstr, <<"stream">>}])),
+    ?assertEqual({'queue.declare_ok', Q, 0, 0},
+                 declare(Ch, Q, [{<<"x-queue-type">>, longstr, <<"stream">>}])),
+
+    ?assertMatch([_], rpc:call(Server, supervisor, which_children,
+                               [osiris_writer_sup])),
+    ?assertMatch([], rpc:call(Server, supervisor, which_children,
+                               [osiris_replica_sup])),
 
     %% Test declare an existing queue with different arguments
-    ?assertExit(_, declare(Ch, LQ, [])).
+    ?assertExit(_, declare(Ch, Q, [])).
+
+delete_queue(Config) ->
+    [Server | _] = rabbit_ct_broker_helpers:get_node_configs(Config, nodename),
+
+    Ch = rabbit_ct_client_helpers:open_channel(Config, Server),
+    Q = ?config(queue_name, Config),
+    ?assertEqual({'queue.declare_ok', Q, 0, 0},
+                 declare(Ch, Q, [{<<"x-queue-type">>, longstr, <<"stream">>}])),
+    ?assertMatch(#'queue.delete_ok'{},
+                 amqp_channel:call(Ch, #'queue.delete'{queue = Q})).
 
 %%----------------------------------------------------------------------------
 
