@@ -35,6 +35,7 @@
          dequeue/4,
          info/2,
          init/1,
+         update/2,
          state_info/1,
          stat/1]).
 
@@ -143,6 +144,9 @@ info(_, _) ->
 
 init(_) ->
     ok.
+
+update(_, State) ->
+    State.
 
 state_info(_) ->
     ok.
