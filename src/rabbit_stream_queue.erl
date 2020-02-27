@@ -39,6 +39,8 @@
          state_info/1,
          stat/1]).
 
+-export([set_retention_policy/3]).
+
 -include("rabbit.hrl").
 -include("amqqueue.hrl").
 
@@ -121,7 +123,7 @@ cancel(_, _, _, _, _) ->
 credit(_, _, _, _) ->
     ok.
 
-deliver(_, _) ->
+deliver(QSs, Delivery) ->
     ok.
 
 dequeue(_, _, _, _) ->
@@ -154,6 +156,25 @@ update(_, State) ->
 state_info(_) ->
     ok.
 
+set_retention_policy(Name, VHost, Policy) ->
+    case rabbit_amqqueue:check_max_age(Policy) of
+        {error, _} = E ->
+            E;
+        MaxAge ->
+            QName = rabbit_misc:r(VHost, queue, Name),
+            Fun = fun(Q) ->
+                          Conf = amqqueue:get_type_state(Q),
+                          amqqueue:set_type_state(Q, Conf#{max_age => MaxAge})
+                  end,
+            case rabbit_misc:execute_mnesia_transaction(
+                   fun() -> rabbit_amqqueue:update(QName, Fun) end) of
+                not_found ->
+                    {error, not_found};
+                _ ->
+                    ok
+            end
+    end.
+
 make_stream_conf(Node, Q) ->
     QName = amqqueue:get_name(Q),
     Name = qname_to_internal_name(QName),
@@ -173,25 +194,7 @@ make_stream_conf(Node, Q) ->
       replica_nodes => Replicas}.
 
 max_age(Age1, Age2) ->
-    min(max_age_in_ms(Age1), max_age_in_ms(Age2)).
-
-max_age_in_ms(Age) ->
-    {match, [Value, Unit]} = re:run(Age, "(^[0-9]*)(.*)", [{capture, all_but_first, list}]),
-    Int = list_to_integer(Value),
-    Int * unit_value_in_ms(Unit).
-
-unit_value_in_ms("Y") ->
-    365 * unit_value_in_ms("D");
-unit_value_in_ms("M") ->
-    30 * unit_value_in_ms("D");
-unit_value_in_ms("D") ->
-    24 * unit_value_in_ms("h");
-unit_value_in_ms("h") ->
-    3600 * unit_value_in_ms("s");
-unit_value_in_ms("m") ->
-    60 * unit_value_in_ms("s");
-unit_value_in_ms("s") ->
-    1000.
+    min(rabbit_amqqueue:check_max_age(Age1), rabbit_amqqueue:check_max_age(Age2)).
 
 check_invalid_arguments(QueueName, Args) ->
     Keys = [<<"x-expires">>, <<"x-message-ttl">>,
