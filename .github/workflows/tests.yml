@@ -2,9 +2,33 @@
 name: Tests
 on: push
 jobs:
-  test:
+  check:
     # https://help.github.com/en/actions/reference/context-and-expression-syntax-for-github-actions#contexts
-    name: OTP ${{matrix.otp}}
+    name: Run checks
+    runs-on: ubuntu-18.04
+    steps:
+      - name: CHECKOUT REPOSITORY
+        uses: actions/checkout@v2
+      # https://github.com/marketplace/actions/setup-elixir
+      - name: CONFIGURE OTP & ELIXIR
+        uses: actions/setup-elixir@v1
+        with:
+          otp-version: 21.3
+          # https://github.com/elixir-lang/elixir/releases
+          elixir-version: 1.10.2
+      - name: CHECK RABBITMQ COMPONENTS
+        run: |
+          branch_or_tag_name=${GITHUB_REF#refs/*/}
+          make check-rabbitmq-components.mk base_rmq_ref=master current_rmq_ref=$branch_or_tag_name
+      # TODO: Are there any xref results that we should capture as artefacts?
+      - name: CHECK CROSS REFERENCES
+        run: |
+          branch_or_tag_name=${GITHUB_REF#refs/*/}
+          make check-rabbitmq-components.mk base_rmq_ref=master current_rmq_ref=$branch_or_tag_name
+  unit:
+    needs: check
+    # https://help.github.com/en/actions/reference/context-and-expression-syntax-for-github-actions#contexts
+    name: Run unit tests on OTP ${{matrix.otp}}
     runs-on: ubuntu-18.04
     strategy:
       matrix:
@@ -19,26 +43,14 @@ jobs:
           otp-version: ${{matrix.otp}}
           # https://github.com/elixir-lang/elixir/releases
           elixir-version: 1.10.2
-      - name: CHECK RABBITMQ COMPONENTS
+      - name: RUN TESTS
         run: |
           branch_or_tag_name=${GITHUB_REF#refs/*/}
-          make check-rabbitmq-components.mk base_rmq_ref=master current_rmq_ref=$branch_or_tag_name
-      - name: CHECK CROSS REFERENCES
-        run: |
-          branch_or_tag_name=${GITHUB_REF#refs/*/}
-          make xref base_rmq_ref=master current_rmq_ref=$branch_or_tag_name
-      - name: RUN FAST TESTS
-        run: |
-          branch_or_tag_name=${GITHUB_REF#refs/*/}
-          make ct-fast base_rmq_ref=master current_rmq_ref=$branch_or_tag_name
-      - name: RUN SLOW TESTS
-        run: |
-          branch_or_tag_name=${GITHUB_REF#refs/*/}
-          make ct-slow base_rmq_ref=master current_rmq_ref=$branch_or_tag_name
-      # TODO: Are there any xref results that we should capture as artefacts?
-      - name: CAPTURE TESTS LOGS AS ARTIFACT
+          make eunit base_rmq_ref=master current_rmq_ref=$branch_or_tag_name
+      - name: ON FAILURE CAPTURE TESTS LOGS AS ARTIFACT
         # https://github.com/marketplace/actions/upload-artifact
         uses: actions/upload-artifact@v1
+        if: failure()
         with:
           name: tests-logs-OTPv${{matrix.otp}}
           path: logs
