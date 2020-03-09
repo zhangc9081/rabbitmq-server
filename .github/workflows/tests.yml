@@ -3,7 +3,7 @@ name: Tests
 on: push
 jobs:
   check:
-    name: Components & Xref
+    name: Checks
     runs-on: ubuntu-18.04
     steps:
       - name: CHECKOUT REPOSITORY
@@ -27,7 +27,7 @@ jobs:
   eunit:
     needs: check
     # https://help.github.com/en/actions/reference/context-and-expression-syntax-for-github-actions#contexts
-    name: eunit OTP v${{matrix.otp}}
+    name: OTP ${{matrix.otp}} eunit
     runs-on: ubuntu-18.04
     strategy:
       matrix:
@@ -53,10 +53,10 @@ jobs:
         with:
           name: tests-logs-OTPv${{matrix.otp}}
           path: logs
-  amqqueue_backward_compatibility:
+  ct-amqqueue_backward_compatibility:
     needs: check
     # https://help.github.com/en/actions/reference/context-and-expression-syntax-for-github-actions#contexts
-    name: v${{matrix.otp}} amqqueue_backward_compatibility
+    name: OTP ${{matrix.otp}} ct-amqqueue_backward_compatibility
     runs-on: ubuntu-18.04
     strategy:
       matrix:
@@ -82,10 +82,10 @@ jobs:
         with:
           name: tests-logs-OTPv${{matrix.otp}}
           path: logs
-  backing_queue:
+  ct-backing_queue:
     needs: check
     # https://help.github.com/en/actions/reference/context-and-expression-syntax-for-github-actions#contexts
-    name: v${{matrix.otp}} backing_queue
+    name: OTP ${{matrix.otp}} ct-backing_queue
     runs-on: ubuntu-18.04
     strategy:
       matrix:
@@ -111,10 +111,10 @@ jobs:
         with:
           name: tests-logs-OTPv${{matrix.otp}}
           path: logs
-  channel_interceptor:
+  ct-channel_interceptor:
     needs: check
     # https://help.github.com/en/actions/reference/context-and-expression-syntax-for-github-actions#contexts
-    name: v${{matrix.otp}} channel_interceptor
+    name: OTP ${{matrix.otp}} ct-channel_interceptor
     runs-on: ubuntu-18.04
     strategy:
       matrix:
@@ -140,10 +140,10 @@ jobs:
         with:
           name: tests-logs-OTPv${{matrix.otp}}
           path: logs
-  channel_operation_timeout:
+  ct-channel_operation_timeout:
     needs: check
     # https://help.github.com/en/actions/reference/context-and-expression-syntax-for-github-actions#contexts
-    name: v${{matrix.otp}} channel_operation_timeout
+    name: OTP ${{matrix.otp}} ct-channel_operation_timeout
     runs-on: ubuntu-18.04
     strategy:
       matrix:
@@ -169,10 +169,10 @@ jobs:
         with:
           name: tests-logs-OTPv${{matrix.otp}}
           path: logs
-  cluster:
+  ct-cluster:
     needs: check
     # https://help.github.com/en/actions/reference/context-and-expression-syntax-for-github-actions#contexts
-    name: v${{matrix.otp}} cluster
+    name: OTP ${{matrix.otp}} ct-cluster
     runs-on: ubuntu-18.04
     strategy:
       matrix:
@@ -198,10 +198,10 @@ jobs:
         with:
           name: tests-logs-OTPv${{matrix.otp}}
           path: logs
-  cluster_formation_locking:
+  ct-cluster_formation_locking:
     needs: check
     # https://help.github.com/en/actions/reference/context-and-expression-syntax-for-github-actions#contexts
-    name: v${{matrix.otp}} cluster_formation_locking
+    name: OTP ${{matrix.otp}} ct-cluster_formation_locking
     runs-on: ubuntu-18.04
     strategy:
       matrix:
@@ -227,10 +227,10 @@ jobs:
         with:
           name: tests-logs-OTPv${{matrix.otp}}
           path: logs
-  authn_authz_context_propagation:
+  ct-authn_authz_context_propagation:
     needs: check
     # https://help.github.com/en/actions/reference/context-and-expression-syntax-for-github-actions#contexts
-    name: v${{matrix.otp}} authn_authz_context_propagation
+    name: OTP ${{matrix.otp}} ct-authn_authz_context_propagation
     runs-on: ubuntu-18.04
     strategy:
       matrix:
