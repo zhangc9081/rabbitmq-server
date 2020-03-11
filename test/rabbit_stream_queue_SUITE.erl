@@ -252,9 +252,7 @@ declare_queue(Config) ->
                  declare(Ch, Q, [{<<"x-queue-type">>, longstr, <<"stream">>}])),
 
     ?assertMatch([_], rpc:call(Server, supervisor, which_children,
-                               [osiris_writer_sup])),
-    ?assertMatch([], rpc:call(Server, supervisor, which_children,
-                               [osiris_replica_sup])),
+                               [osiris_server_sup])),
 
     %% Test declare an existing queue with different arguments
     ?assertExit(_, declare(Ch, Q, [])).

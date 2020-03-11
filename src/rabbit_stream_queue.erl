@@ -177,16 +177,14 @@ set_retention_policy(Name, VHost, Policy) ->
 
 make_stream_conf(Node, Q) ->
     QName = amqqueue:get_name(Q),
-    Name = qname_to_internal_name(QName),
-    LName = atom_to_list(Name),
-    N = ra_lib:derive_safe_string(LName, length(LName)),
+    Name = queue_name(QName),
     MaxLength = args_policy_lookup(<<"max-length">>, fun min/2, Q),
     MaxBytes = args_policy_lookup(<<"max-length-bytes">>, fun min/2, Q),
     %% TODO max age units
     MaxAge = args_policy_lookup(<<"max-age">>, fun max_age/2, Q),
     Replicas = rabbit_mnesia:cluster_nodes(all) -- [Node],
     #{reference => QName,
-      name => list_to_atom(N),
+      name => Name,
       max_length => MaxLength,
       max_bytes => MaxBytes,
       max_age => MaxAge,
@@ -202,3 +200,8 @@ check_invalid_arguments(QueueName, Args) ->
             <<"x-max-in-memory-length">>, <<"x-max-in-memory-bytes">>,
             <<"x-quorum-initial-group-size">>, <<"x-cancel-on-ha-failover">>],
     rabbit_queue_type_util:check_invalid_arguments(QueueName, Args, Keys).
+
+queue_name(#resource{virtual_host = VHost, name = Name}) ->
+    Timestamp = erlang:integer_to_binary(erlang:system_time()),
+    osiris_util:to_base64uri(erlang:binary_to_list(<<VHost/binary, "_", Name/binary, "_",
+                                                     Timestamp/binary>>)).
