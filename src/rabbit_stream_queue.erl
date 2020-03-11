@@ -40,6 +40,8 @@
          stat/1]).
 
 -export([set_retention_policy/3]).
+-export([add_replica/3,
+         delete_replica/3]).
 
 -include("rabbit.hrl").
 -include("amqqueue.hrl").
@@ -123,7 +125,7 @@ cancel(_, _, _, _, _) ->
 credit(_, _, _, _) ->
     ok.
 
-deliver(QSs, Delivery) ->
+deliver(_QSs, _Delivery) ->
     ok.
 
 dequeue(_, _, _, _) ->
@@ -132,8 +134,11 @@ dequeue(_, _, _, _) ->
 handle_event(_, _) ->
     ok.
 
-is_recoverable(_) ->
-    ok.
+is_recoverable(Q) ->
+    Node = node(),
+    #{replica_nodes := Nodes,
+      leader_node := Leader} = amqqueue:get_type_state(Q),
+    lists:member(Node, Nodes ++ [Leader]).
 
 recover(_, _) ->
     ok.
@@ -144,8 +149,15 @@ reject(_, _, _, _) ->
 settle(_, _, _) ->
     ok.
 
-info(_, _) ->
-    ok.
+info(Q, Items) ->
+    lists:foldr(fun(Item, Acc) ->
+                        [{Item, i(Item, Q)} | Acc]
+                end, [], Items).
+
+i(name,        Q) when ?is_amqqueue(Q) -> amqqueue:get_name(Q);
+i(durable,     Q) when ?is_amqqueue(Q) -> amqqueue:is_durable(Q);
+i(auto_delete, Q) when ?is_amqqueue(Q) -> amqqueue:is_auto_delete(Q);
+i(arguments,   Q) when ?is_amqqueue(Q) -> amqqueue:get_arguments(Q).
 
 init(_) ->
     ok.
@@ -173,6 +185,65 @@ set_retention_policy(Name, VHost, Policy) ->
                 _ ->
                     ok
             end
+    end.
+
+add_replica(VHost, Name, Node) ->
+    QName = rabbit_misc:r(VHost, queue, Name),
+    Fun = fun(Q) ->
+                  Conf = amqqueue:get_type_state(Q),
+                  Replicas = maps:get(replica_nodes, Conf),
+                  case lists:member(Node, Replicas) of
+                      true ->
+                          Q;
+                      false ->
+                          {ok, Pid} = osiris_replica:start(Node, Conf),
+                          ReplicaPids = maps:get(replica_pids, Conf),
+                          Conf1 = maps:put(replica_pids, [Pid | ReplicaPids],
+                                           maps:put(replica_nodes, [Node | Replicas], Conf)),
+                          amqqueue:set_type_state(Q, Conf1)
+                  end
+          end,
+    case lists:member(Node, rabbit_mnesia:cluster_nodes(running)) of
+        false ->
+            rabbit_log:warning("Nodes ~p mnesia nodes ~p node ~p",
+                               [nodes(), rabbit_mnesia:cluster_nodes(running), Node]),
+            {error, node_not_running};
+        true ->
+            case rabbit_misc:execute_mnesia_transaction(
+                   fun() -> rabbit_amqqueue:update(QName, Fun) end) of
+                not_found ->
+                    {error, not_found};
+                _ ->
+                    ok
+            end
+    end.
+
+delete_replica(VHost, Name, Node) ->
+    QName = rabbit_misc:r(VHost, queue, Name),
+    Fun = fun(Q) ->
+                  Conf = amqqueue:get_type_state(Q),
+                  Replicas = maps:get(replica_nodes, Conf),
+                  case lists:member(Node, Replicas) of
+                      true ->
+                          %% What if delete directory crashes?
+                          ok = osiris_replica:delete(Node, Conf),
+                          ReplicaPids0 = maps:get(replica_pids, Conf),
+                          ReplicaPids = lists:filter(fun(Pid) ->
+                                                             node(Pid) =/= Node
+                                                     end, ReplicaPids0),
+                          Conf1 = maps:put(replica_pids, ReplicaPids,
+                                           maps:put(replica_nodes, lists:delete(Node, Replicas), Conf)),
+                          amqqueue:set_type_state(Q, Conf1);
+                      false ->
+                          Q
+                  end
+          end,
+    case rabbit_misc:execute_mnesia_transaction(
+           fun() -> rabbit_amqqueue:update(QName, Fun) end) of
+        not_found ->
+            {error, not_found};
+        _ ->
+            ok
     end.
 
 make_stream_conf(Node, Q) ->

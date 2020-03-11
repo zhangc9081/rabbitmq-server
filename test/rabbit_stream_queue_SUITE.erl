@@ -28,7 +28,8 @@ suite() ->
 all() ->
     [
       {group, single_node},
-      {group, clustered}
+      {group, clustered},
+      {group, unclustered}
     ].
 
 groups() ->
@@ -38,7 +39,10 @@ groups() ->
                       {cluster_size_2, [], all_tests()},
                       {cluster_size_3, [], all_tests()},
                       {cluster_size_5, [], all_tests()}
-                     ]}
+                     ]},
+     {unclustered, [], [
+                        {cluster_size_3, [], [add_replica]}
+                       ]}
     ].
 
 all_tests() ->
@@ -266,6 +270,31 @@ delete_queue(Config) ->
                  declare(Ch, Q, [{<<"x-queue-type">>, longstr, <<"stream">>}])),
     ?assertMatch(#'queue.delete_ok'{},
                  amqp_channel:call(Ch, #'queue.delete'{queue = Q})).
+
+add_replica(Config) ->
+    [Server0, Server1, Server2] = Servers0 =
+        rabbit_ct_broker_helpers:get_node_configs(Config, nodename),
+    Ch = rabbit_ct_client_helpers:open_channel(Config, Server0),
+    Q = ?config(queue_name, Config),
+    ?assertEqual({'queue.declare_ok', Q, 0, 0},
+                 declare(Ch, Q, [{<<"x-queue-type">>, longstr, <<"stream">>}])),
+    %% Not a member of the cluster, what would happen?
+    ?assertEqual({error, node_not_running},
+                 rpc:call(Server0, rabbit_stream_queue, add_replica,
+                          [<<"/">>, Q, Server1])),
+    ok = rabbit_control_helper:command(stop_app, Server1),
+    ok = rabbit_control_helper:command(join_cluster, Server1, [atom_to_list(Server0)], []),
+    rabbit_control_helper:command(start_app, Server1),
+    timer:sleep(1000),
+    ?assertEqual(ok,
+                 rpc:call(Server0, rabbit_stream_queue, add_replica,
+                          [<<"/">>, Q, Server1])),
+    %% TODO how do we verify this?
+    %% replicas must be recorded on the state, and if we publish messages then they must
+    %% be stored on disk
+    Info = rabbit_ct_broker_helpers:rpc(Config, 0,
+                                        rabbit_amqqueue, info_all, [<<"/">>, [name]]),
+    ct:pal("INFO ~p", [Info]).
 
 %%----------------------------------------------------------------------------
 
