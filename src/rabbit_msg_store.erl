@@ -715,6 +715,9 @@ clear_client(CRef, State = #msstate { cref_to_msg_ids = CTM,
 
 
 init([Type, BaseDir, ClientRefs, StartupFunState]) ->
+    io:format(?MODULE_STRING ++ ":init sleeping to give time to reattach observer~n", []),
+    timer:sleep(10000),
+
     process_flag(trap_exit, true),
 
     ok = file_handle_cache:register_callback(?MODULE, set_maximum_since_use,
@@ -797,15 +800,20 @@ init([Type, BaseDir, ClientRefs, StartupFunState]) ->
                      },
     %% If we didn't recover the msg location index then we need to
     %% rebuild it now.
+    io:format(?MODULE_STRING ++ ":init about to build_index~n", []),
     {Offset, State1 = #msstate { current_file = CurFile }} =
         build_index(CleanShutdown, StartupFunState, State),
+    io:format(?MODULE_STRING ++ ":init finished build_index~n", []),
     %% read is only needed so that we can seek
     {ok, CurHdl} = open_file(Dir, filenum_to_name(CurFile),
                              [read | ?WRITE_MODE]),
     {ok, Offset} = file_handle_cache:position(CurHdl, Offset),
     ok = file_handle_cache:truncate(CurHdl),
 
-    {ok, maybe_compact(State1 #msstate { current_file_handle = CurHdl }),
+    io:format(?MODULE_STRING ++ ":init about to maybe_compact~n", []),
+    MaybeCompact = maybe_compact(State1 #msstate { current_file_handle = CurHdl }),
+    io:format(?MODULE_STRING ++ ":init finished maybe_compact~n", []),
+    {ok, MaybeCompact,
      hibernate,
      {backoff, ?HIBERNATE_AFTER_MIN, ?HIBERNATE_AFTER_MIN, ?DESIRED_HIBERNATE}}.
 
@@ -1640,6 +1648,7 @@ count_msg_refs(Gen, Seed, State) ->
         {_MsgId, 0, Next} ->
             count_msg_refs(Gen, Next, State);
         {MsgId, Delta, Next} ->
+            % io:format(?MODULE_STRING ++ ":count_msg_refs(~p, ~p)~n", [Gen, Seed]),
             ok = case index_lookup(MsgId, State) of
                      not_found ->
                          index_insert(#msg_location { msg_id = MsgId,
@@ -1721,26 +1730,37 @@ drop_contiguous_block_prefix(MsgsAfterGap, ExpectedOffset) ->
 
 build_index(true, _StartupFunState,
             State = #msstate { file_summary_ets = FileSummaryEts }) ->
-    ets:foldl(
-      fun (#file_summary { valid_total_size = ValidTotalSize,
-                           file_size        = FileSize,
-                           file             = File },
-           {_Offset, State1 = #msstate { sum_valid_data = SumValid,
-                                         sum_file_size  = SumFileSize }}) ->
-              {FileSize, State1 #msstate {
-                           sum_valid_data = SumValid + ValidTotalSize,
-                           sum_file_size  = SumFileSize + FileSize,
-                           current_file   = File }}
-      end, {0, State}, FileSummaryEts);
+    io:format(?MODULE_STRING ++ ":build_index about to ets:fold~n", []),
+    Result = ets:foldl(
+               fun (#file_summary { valid_total_size = ValidTotalSize,
+                                    file_size        = FileSize,
+                                    file             = File },
+                    {_Offset, State1 = #msstate { sum_valid_data = SumValid,
+                                                  sum_file_size  = SumFileSize }}) ->
+                       {FileSize, State1 #msstate {
+                                    sum_valid_data = SumValid + ValidTotalSize,
+                                    sum_file_size  = SumFileSize + FileSize,
+                                    current_file   = File }}
+               end, {0, State}, FileSummaryEts),
+    io:format(?MODULE_STRING ++ ":build_index done ets:fold~n", []),
+    Result;
 build_index(false, {MsgRefDeltaGen, MsgRefDeltaGenInit},
             State = #msstate { dir = Dir }) ->
+    io:format(?MODULE_STRING ++ ":build_index about to count_msg_refs~n", []),
     ok = count_msg_refs(MsgRefDeltaGen, MsgRefDeltaGenInit, State),
+    io:format(?MODULE_STRING ++ ":build_index done count_msg_refs~n", []),
     {ok, Pid} = gatherer:start_link(),
+    io:format(?MODULE_STRING ++ ":build_index done gatherer:start_link()~n", []),
     case [filename_to_num(FileName) ||
              FileName <- list_sorted_filenames(Dir, ?FILE_EXTENSION)] of
-        []     -> build_index(Pid, undefined, [State #msstate.current_file],
-                              State);
-        Files  -> {Offset, State1} = build_index(Pid, undefined, Files, State),
+        []     -> io:format(?MODULE_STRING ++ ":build_index building index for [] files~n", []),
+                  Index = build_index(Pid, undefined, [State #msstate.current_file],
+                                      State),
+                  io:format(?MODULE_STRING ++ ":build_index done building index for [] files~n", []),
+                  Index;
+        Files  -> io:format(?MODULE_STRING ++ ":build_index building index for ~p files~n", [length(Files)]),
+                  {Offset, State1} = build_index(Pid, undefined, Files, State),
+                  io:format(?MODULE_STRING ++ ":build_index done building for ~p files~n", [length(Files)]),
                   {Offset, lists:foldl(fun delete_file_if_empty/2,
                                        State1, Files)}
     end.
@@ -1749,6 +1769,7 @@ build_index(Gatherer, Left, [],
             State = #msstate { file_summary_ets = FileSummaryEts,
                                sum_valid_data   = SumValid,
                                sum_file_size    = SumFileSize }) ->
+    io:format(?MODULE_STRING ++ "build_index about to gatherer:out~n", []),
     case gatherer:out(Gatherer) of
         empty ->
             ok = gatherer:stop(Gatherer),
@@ -1780,43 +1801,87 @@ build_index(Gatherer, Left, [File|Files], State) ->
 
 build_index_worker(Gatherer, State = #msstate { dir = Dir },
                    Left, File, Files) ->
-    {ok, Messages, FileSize} =
-        scan_file_for_valid_messages(Dir, filenum_to_name(File)),
-    {ValidMessages, ValidTotalSize} =
-        lists:foldl(
-          fun (Obj = {MsgId, TotalSize, Offset}, {VMAcc, VTSAcc}) ->
-                  case index_lookup(MsgId, State) of
-                      #msg_location { file = undefined } = StoreEntry ->
-                          ok = index_update(StoreEntry #msg_location {
-                                              file = File, offset = Offset,
-                                              total_size = TotalSize },
-                                            State),
-                          {[Obj | VMAcc], VTSAcc + TotalSize};
-                      _ ->
-                          {VMAcc, VTSAcc}
-                  end
-          end, {[], 0}, Messages),
+    io:format(?MODULE_STRING ++ ":build_index_worker File:~p~n", [File]),
+
+    % thought: what if we avoid building the list of messages, and return on the last?
+    FileName = filenum_to_name(File),
+    {ok, {LastValidMessage, ValidTotalSize}, FileSize} =
+        case open_file(Dir, FileName, ?READ_MODE) of
+            {ok, Hdl}       -> Valid = rabbit_msg_file:scan(
+                                         Hdl,
+                                         filelib:file_size(form_filename(Dir, FileName)),
+                                         fun({MsgId, TotalSize, Offset, _Msg}, {_LastMsg, AccTotalSize} = Acc) ->
+                                                 % io:format(?MODULE_STRING ++ ":build_index_worker scanning ~p~n", [MsgId]),
+                                                 case index_lookup(MsgId, State) of
+                                                     #msg_location { file = undefined } = StoreEntry ->
+                                                         ok = index_update(StoreEntry #msg_location {
+                                                                             file = File, offset = Offset,
+                                                                             total_size = TotalSize },
+                                                                           State),
+                                                         Message = {MsgId, TotalSize, Offset},
+                                                         {Message, AccTotalSize + TotalSize};
+                                                     _ ->
+                                                         Acc
+
+                                                 end
+                                         end,
+                                         {undefined, 0}),
+                               ok = file_handle_cache:close(Hdl),
+                               Valid;
+            {error, enoent} -> {ok, {undefined, 0}, 0};
+            {error, Reason} -> {error, {unable_to_scan_file, FileName, Reason}}
+        end,
     {Right, FileSize1} =
         case Files of
             %% if it's the last file, we'll truncate to remove any
             %% rubbish above the last valid message. This affects the
             %% file size.
-            []    -> {undefined, case ValidMessages of
-                                     [] -> 0;
-                                     _  -> {_MsgId, TotalSize, Offset} =
-                                               lists:last(ValidMessages),
+            []    -> {undefined, case LastValidMessage of
+                                     undefined -> 0;
+                                     _  -> {_MsgId, TotalSize, Offset} = LastValidMessage,
                                            Offset + TotalSize
                                  end};
             [F|_] -> {F, FileSize}
         end,
+
+%%    {ok, Messages, FileSize} =
+%%        scan_file_for_valid_messages(Dir, filenum_to_name(File)),
+%%    io:format(?MODULE_STRING ++ ":build_index_worker scan_file_for_valid_messages complete ~p~n", [length(Messages)]),
+%%    {ValidMessages, ValidTotalSize} =
+%%        lists:foldl(
+%%          fun (Obj = {MsgId, TotalSize, Offset}, {VMAcc, VTSAcc}) ->
+%%                  case index_lookup(MsgId, State) of
+%%                      #msg_location { file = undefined } = StoreEntry ->
+%%                          ok = index_update(StoreEntry #msg_location {
+%%                                              file = File, offset = Offset,
+%%                                              total_size = TotalSize },
+%%                                            State),
+%%                          {[Obj | VMAcc], VTSAcc + TotalSize};
+%%                      _ ->
+%%                          {VMAcc, VTSAcc}
+%%                  end
+%%          end, {[], 0}, Messages),
+%%    {Right, FileSize1} =
+%%        case Files of
+%%            %% if it's the last file, we'll truncate to remove any
+%%            %% rubbish above the last valid message. This affects the
+%%            %% file size.
+%%            []    -> {undefined, case ValidMessages of
+%%                                     [] -> 0;
+%%                                     _  -> {_MsgId, TotalSize, Offset} =
+%%                                               lists:last(ValidMessages),
+%%                                           Offset + TotalSize
+%%                                 end};
+%%            [F|_] -> {F, FileSize}
+%%        end,
     ok = gatherer:in(Gatherer, #file_summary {
-                       file             = File,
-                       valid_total_size = ValidTotalSize,
-                       left             = Left,
-                       right            = Right,
-                       file_size        = FileSize1,
-                       locked           = false,
-                       readers          = 0 }),
+                                  file             = File,
+                                  valid_total_size = ValidTotalSize,
+                                  left             = Left,
+                                  right            = Right,
+                                  file_size        = FileSize1,
+                                  locked           = false,
+                                  readers          = 0 }),
     ok = gatherer:finish(Gatherer).
 
 %%----------------------------------------------------------------------------
